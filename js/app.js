@@ -1018,29 +1018,19 @@ App.modules.learning = function(el) {
   App.loadLearningFeed().then(() => App.learnTab('english'));
 };
 
-// ===== 拉取 /data/learning.json 自动推送内容，合并到本地 Store =====
+// ===== 从 GitHub learning-data 分支拉取每日学习推送内容 =====
+// learning.json 只存在 learning-data 分支，不合并到 main，不触发 Netlify 部署
 App.loadLearningFeed = async function() {
-  const AUTO_TABS = ['english', 'finance', 'chat'];
+  const RAW_URL = 'https://raw.githubusercontent.com/rhea1118/rhea-dashboard/learning-data/data/learning.json';
   try {
-    const resp = await fetch('data/learning.json?t=' + Date.now());
-    if (!resp.ok) return;
+    let resp = await fetch(RAW_URL + '?t=' + Date.now());
+    if (!resp.ok) {
+      // 公网不可达时回退到本地文件（开发环境）
+      resp = await fetch('data/learning.json?t=' + Date.now());
+      if (!resp.ok) return;
+    }
     const feed = await resp.json();
     if (!feed) return;
-    const data = Store.get('learning', { english: [], reading: [], finance: [], chat: [] });
-    let changed = false;
-    AUTO_TABS.forEach(tab => {
-      const items = feed[tab] || [];
-      items.forEach(item => {
-        // 避免重复：同日期+同内容不重复插入
-        const exists = (data[tab] || []).some(l => l.date === item.date && l.content === item.content);
-        if (!exists) {
-          data[tab] = data[tab] || [];
-          data[tab].push({ id: U.uid(), date: item.date, content: item.content, created: item.created || Date.now(), auto: true });
-          changed = true;
-        }
-      });
-    });
-    if (changed) Store.set('learning', data);
     App._learningFeed = feed;
   } catch (e) {
     console.log('learning feed 暂未就绪:', e.message);
@@ -1058,17 +1048,18 @@ App.learnTab = function(tab) {
   const ph = { english: '今天学了什么英语？单词、句子、语法...', reading: '今天读了什么书/文章？', finance: '今天学了什么理财知识？', chat: '今天和客户聊了什么？记录沟通技巧...' };
   const isAuto = tab === 'english' || tab === 'finance' || tab === 'chat';
 
-  // 自动推送的最新一条
+  // 自动推送内容（从 GitHub learning-data 分支拉取）
   let feedCard = '';
   if (isAuto && App._learningFeed) {
-    const feedItems = (App._learningFeed[tab] || []).slice().sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-    if (feedItems.length > 0) {
-      const latest = feedItems[0];
+    const FEED_KEY = { english: 'english', finance: 'finance', chat: 'chatTips' };
+    const feedItem = App._learningFeed[FEED_KEY[tab]];
+    if (feedItem && feedItem.content) {
+      const feedDate = App._learningFeed.date || U.today();
       feedCard = `
         <div class="card feed-card">
           <div class="card-title"><span class="icon-dot" style="background:var(--success)"></span>📡 今日推送（自动抓取）</div>
-          <div class="feed-date text-sm text-light">${U.fmtDateFull(latest.date)}</div>
-          <div class="feed-content">${U.escape(latest.content).replace(/\n/g, '<br>')}</div>
+          <div class="feed-date text-sm text-light">${U.fmtDateFull(feedDate)}</div>
+          <div class="feed-content">${U.escape(feedItem.content).replace(/\n/g, '<br>')}</div>
         </div>
       `;
     }
