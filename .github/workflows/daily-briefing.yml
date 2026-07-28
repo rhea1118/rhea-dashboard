@@ -1,0 +1,90 @@
+name: Daily Briefing Sync
+
+on:
+  # 每天北京时间 8:30 = UTC 0:30
+  schedule:
+    - cron: '30 0 * * *'
+  # 允许手动触发，方便调试
+  workflow_dispatch:
+    inputs:
+      force:
+        description: '强制合并（忽略日期校验）'
+        required: false
+        default: 'false'
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: 检出 main 分支
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 50
+
+      - name: 同步简报到 main
+        env:
+          FORCE: ${{ inputs.force }}
+        run: |
+          set -e
+
+          # 当前北京时间
+          TODAY=$(TZ='Asia/Shanghai' date +%Y-%m-%d)
+          echo "📅 北京时间: $TODAY"
+
+          # ---------- 1. 检查数据分支 ----------
+          if ! git ls-remote --heads origin briefing-data | grep -q briefing-data; then
+            echo "::warning::briefing-data 分支不存在，跳过"
+            exit 0
+          fi
+
+          git fetch origin briefing-data
+
+          # ---------- 2. 检查数据分支文件 ----------
+          if ! git show origin/briefing-data:data/daily-brief.json > /dev/null 2>&1; then
+            echo "::warning::数据分支没有 data/daily-brief.json"
+            exit 0
+          fi
+
+          FILE_DATE=$(git show origin/briefing-data:data/daily-brief.json \
+            | grep -o '"date":[[:space:]]*"[0-9-]*"' | head -1 | cut -d'"' -f4)
+          echo "📄 数据分支文件日期: $FILE_DATE"
+
+          # 强制模式跳过日期校验
+          if [ "$FORCE" != "true" ] && [ "$FILE_DATE" != "$TODAY" ]; then
+            echo "::warning::文件日期不是今天 $TODAY（实际 $FILE_DATE），跳过"
+            exit 0
+          fi
+
+          # ---------- 3. 检查 main 分支是否已是最新 ----------
+          MAIN_DATE=$(git show origin/main:data/daily-brief.json 2>/dev/null \
+            | grep -o '"date":[[:space:]]*"[0-9-]*"' | head -1 | cut -d'"' -f4 || echo "")
+          echo "📄 main 分支文件日期: ${MAIN_DATE:-（无）}"
+
+          if [ "$MAIN_DATE" = "$FILE_DATE" ] && [ "$FORCE" != "true" ]; then
+            # 文件日期相同，进一步比对内容
+            git show origin/briefing-data:data/daily-brief.json > /tmp/new.json
+            git show origin/main:data/daily-brief.json > /tmp/old.json
+            if diff -q /tmp/new.json /tmp/old.json > /dev/null 2>&1; then
+              echo "✅ main 分支已是最新内容，无需重复部署"
+              exit 0
+            fi
+          fi
+
+          # ---------- 4. 复制文件并提交 ----------
+          git checkout origin/briefing-data -- data/daily-brief.json
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/daily-brief.json
+
+          # 没有变更就不提交（防止空 commit）
+          if git diff --cached --quiet; then
+            echo "✅ 文件无变化，无需提交"
+            exit 0
+          fi
+
+          git commit -m "每日简报 $TODAY [skip netlify=false]"
+          git push origin main
+          echo "🚀 已推送到 main 分支，Netlify 即将自动部署"

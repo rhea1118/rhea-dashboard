@@ -1,0 +1,22 @@
+{
+  "github": {
+    "repo": "YOUR_USERNAME/rhea-dashboard",
+    "dataBranch": "briefing-data",
+    "targetBranch": "main",
+    "filePath": "data/daily-brief.json",
+    "token": ""
+  },
+  "_instructions": {
+    "repo": "GitHub 仓库地址，格式：用户名/仓库名",
+    "dataBranch": "WorkBuddy 推送简报的目标分支（不部署，仅数据中转）",
+    "targetBranch": "GitHub Actions 合并的目标分支（Netlify 部署监听这个分支）",
+    "token": "GitHub Personal Access Token，需要 repo 权限。建议用 Fine-grained PAT（仅授权本仓库）。⚠️ 不要把真实 token 提交到 Git。"
+  },
+  "_setup": [
+    "1. 在 https://github.com/settings/tokens 创建 Fine-grained PAT",
+    "2. Repository access 只勾选 rhea-dashboard",
+    "3. Permissions 勾选 Contents: Read and write",
+    "4. 把 token 填到本文件 github.token 字段（deploy-config.json 已在 .gitignore 中）",
+    "5. 在 deploy-config.example.json 中保留示例（不含真实 token）"
+  ]
+}

@@ -22,8 +22,19 @@ const PYTHON = (() => {
 })();
 const GENERATE_SCRIPT = path.join(ROOT, 'scripts', 'generate_briefing.py');
 
+// ===== 简报路径：优先 daily-brief.json（新规范），回退 briefing.json（兼容旧版） =====
+const DATA_DIR = path.join(ROOT, 'data');
+const BRIEFING_FILES = ['daily-brief.json', 'briefing.json'];
+function findBriefingFile() {
+  for (const f of BRIEFING_FILES) {
+    const p = path.join(DATA_DIR, f);
+    if (fs.existsSync(p)) return p;
+  }
+  return path.join(DATA_DIR, 'daily-brief.json'); // 都不存在时返回新规范路径
+}
+const BRIEFING_PATH = findBriefingFile();
+
 // ===== 定时兜底：每天 8:30 检查，如果今天还没简报就自动生成 =====
-const BRIEFING_PATH = path.join(ROOT, 'data', 'briefing.json');
 let _fallbackRanToday = ''; // 记录今天是否已跑过兜底，格式 'YYYY-MM-DD'
 
 function getBeijingDate() {
@@ -75,8 +86,9 @@ function runFallbackGeneration() {
     if (code === 0 && stdout.trim()) {
       try {
         const data = JSON.parse(stdout.trim());
-        fs.writeFileSync(BRIEFING_PATH, JSON.stringify(data, null, 2), 'utf8');
-        console.log(`[Fallback] ✓ 兜底简报已生成并保存 (${today})`);
+        const savePath = path.join(ROOT, 'data', 'daily-brief.json');
+        fs.writeFileSync(savePath, JSON.stringify(data, null, 2), 'utf8');
+        console.log(`[Fallback] ✓ 兜底简报已生成并保存到 ${savePath} (${today})`);
       } catch (e) {
         console.error('[Fallback] JSON 解析失败:', e.message);
       }
@@ -171,13 +183,14 @@ const server = http.createServer((req, res) => {
     req.on('end', () => {
       try {
         const data = JSON.parse(body);
-        const briefingPath = path.join(ROOT, 'data', 'briefing.json');
+        const briefingPath = path.join(ROOT, 'data', 'daily-brief.json');
         fs.writeFile(briefingPath, JSON.stringify(data, null, 2), 'utf8', (err) => {
           if (err) {
             res.writeHead(500, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: '保存失败' }));
             return;
           }
+          console.log(`[API] 简报已保存到 ${briefingPath}`);
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ success: true, message: '简报已保存' }));
         });

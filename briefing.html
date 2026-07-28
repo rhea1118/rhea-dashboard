@@ -75,7 +75,9 @@
     async function load() {
       const app = document.getElementById('app');
       try {
-        const resp = await fetch('data/briefing.json?t=' + Date.now());
+        // 优先读取 daily-brief.json（新规范），回退 briefing.json（兼容旧版）
+        let resp = await fetch('data/daily-brief.json?t=' + Date.now());
+        if (!resp.ok) resp = await fetch('data/briefing.json?t=' + Date.now());
         if (!resp.ok) throw new Error('加载失败: ' + resp.status);
         const d = await resp.json();
         const suggestions = d.topicSuggestions || {};
