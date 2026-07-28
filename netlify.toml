@@ -1,13 +1,9 @@
 [build]
   publish = "."
   command = ""
-
-# 只在 data/daily-brief.json 变更时才构建（其他文件变更跳过，节省额度）
-[build.ignore]
-  # 如果提交里没有 daily-brief.json 的变更，就跳过构建
-  # 这条规则只在 Actions 推到 main 时生效，其他正常代码 push 仍会构建
-  # 注意：Netlify 的 ignore 只对部分文件路径生效，不能用 shell 命令
-  # 所以严格依赖 Actions 只在文件变更时才 push
+  # 只在 daily-brief.json 或 briefing.json 变更时才构建，其他文件变更跳过（节省额度）
+  # 命令退出码 0 = 跳过构建，非 0 = 继续构建
+  ignore = "git diff --quiet HEAD^ HEAD -- data/daily-brief.json data/briefing.json"
 
 [[headers]]
   for = "/data/*.json"
