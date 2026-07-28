@@ -1,0 +1,24 @@
+{
+  "name": "Rhea 工作台",
+  "short_name": "Rhea",
+  "description": "个人助理 Rhea 的工作台 - 待办、外贸运营、学习、记账、减脂、日程、纪念日、经期管理",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F0F4FF",
+  "theme_color": "#6B8AFE",
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

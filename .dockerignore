@@ -1,0 +1,9 @@
+# Docker ignore
+.venv
+__pycache__
+*.pyc
+gen_icons.py
+rhea-dashboard.zip
+部署指南.md
+.git
+node_modules

@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: rhea-dashboard
+    env: docker
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    envVars:
+      - key: PORT
+        value: 8888
+    plan: free

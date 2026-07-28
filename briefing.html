@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>今日外贸热点速报 - Rhea</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background: #f5f7fb;
+      color: #1f2937;
+      line-height: 1.6;
+    }
+    .container { max-width: 860px; margin: 0 auto; padding: 24px 16px; }
+    .header {
+      background: linear-gradient(135deg, #6B8AFE 0%, #8B7FE8 100%);
+      color: white;
+      padding: 28px 24px;
+      border-radius: 16px;
+      margin-bottom: 20px;
+      box-shadow: 0 4px 20px rgba(107,138,254,0.25);
+    }
+    .header h1 { margin: 0 0 8px; font-size: 24px; font-weight: 700; }
+    .header .meta { opacity: 0.9; font-size: 14px; }
+    .card {
+      background: white;
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 16px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+    }
+    .card-title {
+      font-size: 16px;
+      font-weight: 700;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .card-body { font-size: 14px; color: #374151; }
+    .card-body a { color: #6B8AFE; word-break: break-all; }
+    .topics-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 16px;
+    }
+    .topic-card { background: #f8fafc; border-radius: 10px; padding: 16px; }
+    .topic-card .label { font-size: 12px; color: #6B7280; margin-bottom: 6px; }
+    .topic-card .title { font-weight: 600; font-size: 15px; margin-bottom: 8px; }
+    .topic-card .img { font-size: 13px; color: #4B5563; }
+    .loading { text-align: center; padding: 60px 20px; color: #6B7280; }
+    .error { background: #FEF2F2; color: #991B1B; padding: 16px; border-radius: 10px; }
+    .back { display: inline-block; margin-top: 20px; color: #6B8AFE; text-decoration: none; font-size: 14px; }
+    .gen-btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 8px 18px; border: none; border-radius: 20px;
+      background: white; color: #6B8AFE; font-size: 14px; font-weight: 600;
+      cursor: pointer; transition: opacity .15s, transform .15s;
+    }
+    .gen-btn:hover { opacity: 0.85; transform: translateY(-1px); }
+    .gen-btn:disabled { opacity: 0.5; cursor: wait; transform: none; }
+    .gen-status { font-size: 13px; color: rgba(255,255,255,0.8); margin-top: 8px; }
+    .header-actions { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div id="app">
+      <div class="loading">正在加载今日简报...</div>
+    </div>
+  </div>
+  <script>
+    async function load() {
+      const app = document.getElementById('app');
+      try {
+        const resp = await fetch('data/briefing.json?t=' + Date.now());
+        if (!resp.ok) throw new Error('加载失败: ' + resp.status);
+        const d = await resp.json();
+        const suggestions = d.topicSuggestions || {};
+        app.innerHTML = `
+          <div class="header">
+            <div class="header-actions">
+              <div>
+                <h1>📰 今日外贸热点速报</h1>
+                <div class="meta">${d.date || ''} · ${d.source || 'AI自动抓取'} · 生成于 ${d.generatedAt || ''}</div>
+              </div>
+              <button class="gen-btn" id="genBtn" onclick="generateFresh()">🔄 实时生成</button>
+            </div>
+            <div class="gen-status" id="genStatus"></div>
+          </div>
+          <div class="card">
+            <div class="card-title">🌍 非洲市场动态</div>
+            <div class="card-body">${escapeHtml(d.africa || '').replace(/\n/g, '<br>')}</div>
+          </div>
+          <div class="card">
+            <div class="card-title">🌎 南美市场动态</div>
+            <div class="card-body">${escapeHtml(d.southamerica || '').replace(/\n/g, '<br>')}</div>
+          </div>
+          <div class="card">
+            <div class="card-title">💱 汇率 / 海运费</div>
+            <div class="card-body">${escapeHtml(d.fx || '').replace(/\n/g, '<br>')}</div>
+          </div>
+          <div class="card">
+            <div class="card-title">🏭 竞品动态</div>
+            <div class="card-body">${escapeHtml(d.competitor || '').replace(/\n/g, '<br>')}</div>
+          </div>
+          <div class="card">
+            <div class="card-title">💬 社媒热点</div>
+            <div class="card-body">${escapeHtml(d.topics || '').replace(/\n/g, '<br>')}</div>
+          </div>
+          <div class="card">
+            <div class="card-title">📝 今日发帖选题建议</div>
+            <div class="topics-grid">
+              <div class="topic-card">
+                <div class="label">Facebook 配件单品帖</div>
+                <div class="title">${escapeHtml(suggestions.fb1_title || '')}</div>
+                <div class="img">🖼 ${escapeHtml(suggestions.fb1_img || '')}</div>
+              </div>
+              <div class="topic-card">
+                <div class="label">Facebook 整车/实力展示帖</div>
+                <div class="title">${escapeHtml(suggestions.fb2_title || '')}</div>
+                <div class="img">🖼 ${escapeHtml(suggestions.fb2_img || '')}</div>
+              </div>
+              <div class="topic-card">
+                <div class="label">LinkedIn 行业洞察帖</div>
+                <div class="title">${escapeHtml(suggestions.li_title || '')}</div>
+                <div class="img">🖼 ${escapeHtml(suggestions.li_img || '')}</div>
+              </div>
+              <div class="topic-card">
+                <div class="label">WhatsApp Status 即时动态</div>
+                <div class="title">${escapeHtml(suggestions.wa_title || '')}</div>
+                <div class="img">🖼 ${escapeHtml(suggestions.wa_img || '')}</div>
+              </div>
+              <div class="topic-card">
+                <div class="label">YouTube 视频内容</div>
+                <div class="title">${escapeHtml(suggestions.yt_title || '')}</div>
+                <div class="img">🖼 ${escapeHtml(suggestions.yt_img || '')}</div>
+              </div>
+            </div>
+          </div>
+          <a class="back" href="/">← 返回 Rhea 工作台</a>
+        `;
+      } catch (e) {
+        app.innerHTML = `<div class="error">加载简报失败：${escapeHtml(e.message)}</div>`;
+      }
+    }
+    function escapeHtml(str) {
+      return String(str).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+    }
+    async function generateFresh() {
+      const btn = document.getElementById('genBtn');
+      const status = document.getElementById('genStatus');
+      btn.disabled = true;
+      btn.textContent = '⏳ 生成中...';
+      status.textContent = '正在从网络抓取最新数据（约 10-30 秒）';
+      try {
+        const resp = await fetch('/api/generate-briefing', { method: 'POST' });
+        if (!resp.ok) throw new Error('服务器返回 ' + resp.status);
+        const d = await resp.json();
+        if (d.error) throw new Error(d.error);
+        status.textContent = '✅ 最新简报已生成！正在刷新...';
+        setTimeout(() => location.reload(), 800);
+      } catch (e) {
+        status.textContent = '❌ 生成失败：' + e.message + '（可稍后重试）';
+        btn.disabled = false;
+        btn.textContent = '🔄 实时生成';
+      }
+    }
+    load();
+  </script>
+</body>
+</html>
