@@ -170,10 +170,11 @@ App.modules.dashboard = function(el) {
   const periods = Store.get('periods', []);
   const periodInfo = this.getPeriodInfo(periods);
   
-  const learning = Store.get('learning', { english: [], reading: [], finance: [] });
+  const learning = Store.get('learning', { english: [], reading: [], finance: [], chat: [] });
   const todayLearn = learning.english.filter(l => l.date === U.today()).length +
     learning.reading.filter(l => l.date === U.today()).length +
-    learning.finance.filter(l => l.date === U.today()).length;
+    learning.finance.filter(l => l.date === U.today()).length +
+    learning.chat.filter(l => l.date === U.today()).length;
   
   let html = `
     <div class="welcome-banner">
@@ -263,7 +264,7 @@ App.modules.dashboard = function(el) {
         </div>
         <div class="mini-item mt-8">
           <div class="dot" style="background:var(--primary)"></div>
-          <span>本周学习：英语 ${this.weekCount(learning.english)} / 阅读 ${this.weekCount(learning.reading)} / 理财 ${this.weekCount(learning.finance)}</span>
+          <span>本周学习：英语 ${this.weekCount(learning.english)} / 阅读 ${this.weekCount(learning.reading)} / 理财 ${this.weekCount(learning.finance)} / 聊天 ${this.weekCount(learning.chat)}</span>
         </div>
       </div>
     </div>
@@ -1002,17 +1003,48 @@ App.socialQuarterly = function(el) {
    MODULE: Learning
    ============================================================ */
 App.modules.learning = function(el) {
-  const data = Store.get('learning', { english: [], reading: [], finance: [] });
+  const data = Store.get('learning', { english: [], reading: [], finance: [], chat: [] });
   el.innerHTML = `
     <div class="content-tabs">
       <button class="content-tab active" data-ltab="english" onclick="App.learnTab('english')">每日英语</button>
       <button class="content-tab" data-ltab="reading" onclick="App.learnTab('reading')">每日阅读</button>
       <button class="content-tab" data-ltab="finance" onclick="App.learnTab('finance')">理财知识</button>
+      <button class="content-tab" data-ltab="chat" onclick="App.learnTab('chat')">每日外贸聊天小技巧</button>
     </div>
     <div id="learnContent"></div>
   `;
   App._learnTab = 'english';
-  App.learnTab('english');
+  // 拉取自动推送内容（english/finance/chat 三项联网抓取）
+  App.loadLearningFeed().then(() => App.learnTab('english'));
+};
+
+// ===== 拉取 /data/learning.json 自动推送内容，合并到本地 Store =====
+App.loadLearningFeed = async function() {
+  const AUTO_TABS = ['english', 'finance', 'chat'];
+  try {
+    const resp = await fetch('data/learning.json?t=' + Date.now());
+    if (!resp.ok) return;
+    const feed = await resp.json();
+    if (!feed) return;
+    const data = Store.get('learning', { english: [], reading: [], finance: [], chat: [] });
+    let changed = false;
+    AUTO_TABS.forEach(tab => {
+      const items = feed[tab] || [];
+      items.forEach(item => {
+        // 避免重复：同日期+同内容不重复插入
+        const exists = (data[tab] || []).some(l => l.date === item.date && l.content === item.content);
+        if (!exists) {
+          data[tab] = data[tab] || [];
+          data[tab].push({ id: U.uid(), date: item.date, content: item.content, created: item.created || Date.now(), auto: true });
+          changed = true;
+        }
+      });
+    });
+    if (changed) Store.set('learning', data);
+    App._learningFeed = feed;
+  } catch (e) {
+    console.log('learning feed 暂未就绪:', e.message);
+  }
 };
 
 App.learnTab = function(tab) {
@@ -1020,12 +1052,30 @@ App.learnTab = function(tab) {
   document.querySelectorAll('[data-ltab]').forEach(t => t.classList.toggle('active', t.dataset.ltab === tab));
   const c = document.getElementById('learnContent');
   if (!c) return;
-  const data = Store.get('learning', { english: [], reading: [], finance: [] });
+  const data = Store.get('learning', { english: [], reading: [], finance: [], chat: [] });
   const list = data[tab] || [];
-  const titles = { english: '每日英语学习', reading: '每日阅读', finance: '理财知识学习' };
-  const ph = { english: '今天学了什么英语？单词、句子、语法...', reading: '今天读了什么书/文章？', finance: '今天学了什么理财知识？' };
-  
+  const titles = { english: '每日英语学习', reading: '每日阅读', finance: '理财知识学习', chat: '每日外贸聊天小技巧' };
+  const ph = { english: '今天学了什么英语？单词、句子、语法...', reading: '今天读了什么书/文章？', finance: '今天学了什么理财知识？', chat: '今天和客户聊了什么？记录沟通技巧...' };
+  const isAuto = tab === 'english' || tab === 'finance' || tab === 'chat';
+
+  // 自动推送的最新一条
+  let feedCard = '';
+  if (isAuto && App._learningFeed) {
+    const feedItems = (App._learningFeed[tab] || []).slice().sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+    if (feedItems.length > 0) {
+      const latest = feedItems[0];
+      feedCard = `
+        <div class="card feed-card">
+          <div class="card-title"><span class="icon-dot" style="background:var(--success)"></span>📡 今日推送（自动抓取）</div>
+          <div class="feed-date text-sm text-light">${U.fmtDateFull(latest.date)}</div>
+          <div class="feed-content">${U.escape(latest.content).replace(/\n/g, '<br>')}</div>
+        </div>
+      `;
+    }
+  }
+
   c.innerHTML = `
+    ${feedCard}
     <div class="card">
       <div class="card-title"><span class="icon-dot"></span>${titles[tab]}</div>
       <div class="form-row">
@@ -1076,7 +1126,7 @@ App.streakCount = function(arr) {
 };
 
 App.addLearn = function(tab) {
-  const data = Store.get('learning', { english: [], reading: [], finance: [] });
+  const data = Store.get('learning', { english: [], reading: [], finance: [], chat: [] });
   const content = document.getElementById('learn_content').value.trim();
   const date = document.getElementById('learn_date').value;
   if (!content) { toast('请输入学习内容'); return; }
@@ -1089,16 +1139,16 @@ App.addLearn = function(tab) {
 };
 
 App.renderLearnList = function(tab) {
-  const data = Store.get('learning', { english: [], reading: [], finance: [] });
+  const data = Store.get('learning', { english: [], reading: [], finance: [], chat: [] });
   const list = (data[tab] || []).slice().reverse().slice(0, 30);
   const c = document.getElementById('learnList');
   if (!c) return;
   if (list.length === 0) { c.innerHTML = '<div class="empty-state"><p>暂无学习记录</p></div>'; return; }
   c.innerHTML = list.map(l => `
     <div class="mini-item">
-      <div class="dot" style="background:var(--primary)"></div>
+      <div class="dot" style="background:${l.auto ? 'var(--success)' : 'var(--primary)'}"></div>
       <div style="flex:1">
-        <div class="text-sm text-light">${U.fmtDateFull(l.date)}</div>
+        <div class="text-sm text-light">${U.fmtDateFull(l.date)}${l.auto ? '<span class="badge-auto">自动推送</span>' : ''}</div>
         <div>${U.escape(l.content)}</div>
       </div>
       <button class="todo-delete" onclick="App.delLearn('${tab}','${l.id}')">
@@ -1109,7 +1159,7 @@ App.renderLearnList = function(tab) {
 };
 
 App.delLearn = function(tab, id) {
-  const data = Store.get('learning', { english: [], reading: [], finance: [] });
+  const data = Store.get('learning', { english: [], reading: [], finance: [], chat: [] });
   data[tab] = (data[tab] || []).filter(l => l.id !== id);
   Store.set('learning', data);
   App.learnTab(tab);

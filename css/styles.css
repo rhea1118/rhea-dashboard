@@ -900,3 +900,32 @@ anni-entry {
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
+
+/* ===== Learning Feed Card (自动推送) ===== */
+.feed-card {
+  border-left: 4px solid var(--success);
+  background: linear-gradient(135deg, var(--bg-soft) 0%, rgba(99,102,241,0.04) 100%);
+}
+.feed-card .feed-date {
+  margin-bottom: 8px;
+}
+.feed-card .feed-content {
+  font-size: 15px;
+  line-height: 1.8;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.feed-card .card-title {
+  margin-bottom: 4px;
+}
+.badge-auto {
+  display: inline-block;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: var(--success-light, #D1FAE5);
+  color: #059669;
+  margin-left: 6px;
+  vertical-align: middle;
+}

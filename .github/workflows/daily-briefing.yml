@@ -1,4 +1,4 @@
-name: Daily Briefing Sync
+name: Daily Briefing & Learning Sync
 
 on:
   # 每天北京时间 8:30 = UTC 0:30
@@ -24,7 +24,7 @@ jobs:
         with:
           fetch-depth: 50
 
-      - name: 同步简报到 main
+      - name: 同步简报和学习内容到 main
         env:
           FORCE: ${{ inputs.force }}
         run: |
@@ -75,9 +75,18 @@ jobs:
 
           # ---------- 4. 复制文件并提交 ----------
           git checkout origin/briefing-data -- data/daily-brief.json
+
+          # 同步 learning.json（如果数据分支存在）
+          if git show origin/briefing-data:data/learning.json > /dev/null 2>&1; then
+            echo "📚 发现 data/learning.json，一并同步"
+            git checkout origin/briefing-data -- data/learning.json
+          else
+            echo "ℹ️ 数据分支无 data/learning.json，跳过"
+          fi
+
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/daily-brief.json
+          git add -A
 
           # 没有变更就不提交（防止空 commit）
           if git diff --cached --quiet; then
@@ -85,6 +94,6 @@ jobs:
             exit 0
           fi
 
-          git commit -m "每日简报 $TODAY [skip netlify=false]"
+          git commit -m "每日简报 & 学习内容 $TODAY [skip netlify=false]"
           git push origin main
           echo "🚀 已推送到 main 分支，Netlify 即将自动部署"
