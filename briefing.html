@@ -163,7 +163,11 @@
         status.textContent = '✅ 最新简报已生成！正在刷新...';
         setTimeout(() => location.reload(), 800);
       } catch (e) {
-        status.textContent = '❌ 生成失败：' + e.message + '（可稍后重试）';
+        if (e.message.includes('404') || e.message.includes('Failed to fetch')) {
+          status.textContent = '📡 当前为静态部署模式，实时生成不可用。简报每天 8:00 由 AI 自动更新，请稍后刷新查看。';
+        } else {
+          status.textContent = '❌ 生成失败：' + e.message + '（可稍后重试）';
+        }
         btn.disabled = false;
         btn.textContent = '🔄 实时生成';
       }
