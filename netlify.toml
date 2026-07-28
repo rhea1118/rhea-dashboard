@@ -1,9 +1,6 @@
 [build]
   publish = "."
   command = ""
-  # 只在 daily-brief.json 或 briefing.json 变更时才构建，其他文件变更跳过（节省额度）
-  # 命令退出码 0 = 跳过构建，非 0 = 继续构建
-  ignore = "git diff --quiet HEAD^ HEAD -- data/daily-brief.json data/briefing.json"
 
 [[headers]]
   for = "/data/*.json"
