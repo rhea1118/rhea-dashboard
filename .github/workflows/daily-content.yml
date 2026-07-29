@@ -1,0 +1,201 @@
+name: Daily Content Generator
+
+# ============================================================
+# 用途：WorkBuddy 8:00 触发，由 GitHub Actions 写入数据文件
+# 触发方式：
+#   1) WorkBuddy 通过 GitHub API repository_dispatch 事件触发（推荐）
+#   2) 手动在 Actions 页面点击运行（workflow_dispatch）
+#
+# 节省 Netlify 额度策略：
+#   - 内容未变化时跳过 commit，Netlify 不会部署
+#   - 所有任务都路由到同一工作流，通过 concurrency 排队避免冲突
+# ============================================================
+
+on:
+  repository_dispatch:
+    types:
+      - generate-trade-brief      # 每日8点外贸热点速报
+      - generate-english-tips    # 每日外贸英语小技巧
+      - generate-chat-tips       # 每日外贸聊天小技巧
+      - generate-finance-tips    # 每日理财知识
+  workflow_dispatch:
+    inputs:
+      content_type:
+        description: '内容类型'
+        required: true
+        type: choice
+        options:
+          - trade-brief
+          - english-tips
+          - chat-tips
+          - finance-tips
+      content_json:
+        description: 'AI生成的内容JSON（可选，不填则用占位数据）'
+        required: false
+        type: string
+
+# 所有任务排队执行，避免 learning.json 并发写入冲突
+concurrency:
+  group: daily-content
+  cancel-in-progress: false
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 5
+
+      - name: 解析触发参数
+        id: params
+        run: |
+          if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
+            echo "type=${{ github.event.action }}" >> "$GITHUB_OUTPUT"
+            # 将 client_payload 写入临时文件，避开 shell 转义
+            echo '${{ toJSON(github.event.client_payload) }}' > /tmp/payload.json
+          else
+            echo "type=generate-${{ inputs.content_type }}" >> "$GITHUB_OUTPUT"
+            if [ -n "${{ inputs.content_json }}" ]; then
+              echo '${{ inputs.content_json }}' > /tmp/payload.json
+            else
+              echo '{}' > /tmp/payload.json
+            fi
+          fi
+          echo "📨 事件类型: $(cat "$GITHUB_OUTPUT" | grep ^type= | cut -d= -f2)"
+          echo "📦 payload 前200字符: $(head -c 200 /tmp/payload.json)"
+
+      - name: 生成并写入数据
+        env:
+          EVENT_TYPE: ${{ steps.params.outputs.type }}
+          PAYLOAD_FILE: /tmp/payload.json
+        run: |
+          python3 << 'PYEOF'
+          import json, os
+          from datetime import datetime, timezone, timedelta
+
+          tz = timezone(timedelta(hours=8))
+          today = datetime.now(tz).strftime('%Y-%m-%d')
+          now = datetime.now(tz).isoformat()
+
+          # 读取 client_payload
+          payload = {}
+          try:
+              with open(os.environ['PAYLOAD_FILE'], 'r', encoding='utf-8') as f:
+                  raw = f.read().strip()
+              if raw and raw not in ('null', 'undefined'):
+                  payload = json.loads(raw) or {}
+          except Exception as e:
+              print(f"⚠️ payload 解析失败: {e}")
+              payload = {}
+
+          event_type = os.environ['EVENT_TYPE']
+          print(f"📨 处理事件: {event_type}")
+          print(f"📦 payload keys: {list(payload.keys()) if payload else '空'}")
+
+          # ========== 速报 ==========
+          if event_type == 'generate-trade-brief':
+              file = 'data/daily-brief.json'
+              has_content = payload and any(k in payload for k in
+                  ['africa', 'southamerica', 'fx', 'competitor', 'topics'])
+              if has_content:
+                  data = {
+                      'date': today,
+                      'generatedAt': now,
+                      'source': 'WorkBuddy AI 自动抓取',
+                      'africa': payload.get('africa', ''),
+                      'southamerica': payload.get('southamerica', ''),
+                      'fx': payload.get('fx', ''),
+                      'competitor': payload.get('competitor', ''),
+                      'topics': payload.get('topics', ''),
+                      'topicSuggestions': payload.get('topicSuggestions', {})
+                  }
+              else:
+                  data = {
+                      'date': today,
+                      'generatedAt': now,
+                      'source': '⚠️ 占位数据 - WorkBuddy 未提供 client_payload',
+                      'africa': 'WorkBuddy 需在 client_payload 中提供 africa 字段',
+                      'southamerica': '待 WorkBuddy 补充',
+                      'fx': '待 WorkBuddy 补充',
+                      'competitor': '待 WorkBuddy 补充',
+                      'topics': '待 WorkBuddy 补充',
+                      'topicSuggestions': {}
+                  }
+
+          # ========== 学习内容（英语/聊天/理财） ==========
+          elif event_type in ('generate-english-tips', 'generate-chat-tips', 'generate-finance-tips'):
+              file = 'data/learning.json'
+              section_map = {
+                  'generate-english-tips': 'english',
+                  'generate-chat-tips': 'chatTips',
+                  'generate-finance-tips': 'finance'
+              }
+              section = section_map[event_type]
+
+              # 读取现有 learning.json（merge 模式，保留其他 section）
+              data = {'date': today}
+              if os.path.exists(file):
+                  with open(file, 'r', encoding='utf-8') as f:
+                      try:
+                          data = json.load(f)
+                      except Exception:
+                          data = {'date': today}
+              data['date'] = today
+
+              # 更新对应 section
+              if payload and section in payload:
+                  data[section] = payload[section]
+              else:
+                  data[section] = {
+                      'content': f'⚠️ 占位 - WorkBuddy 未在 client_payload 中提供 {section} 字段'
+                  }
+
+          else:
+              print(f"⚠️ 未知事件类型: {event_type}，跳过")
+              # 写一个标记文件，让后续 commit step 检测到无变化
+              with open('/tmp/skip', 'w') as f:
+                  f.write('skip')
+              raise SystemExit(0)
+
+          # ========== 对比 & 写入 ==========
+          old = None
+          if os.path.exists(file):
+              with open(file, 'r', encoding='utf-8') as f:
+                  try:
+                      old = json.load(f)
+                  except Exception:
+                      old = None
+
+          if old == data:
+              print(f"✅ {file} 内容未变化，跳过写入（Netlify 不会部署）")
+              with open('/tmp/skip', 'w') as f:
+                  f.write('skip')
+          else:
+              os.makedirs(os.path.dirname(file), exist_ok=True)
+              with open(file, 'w', encoding='utf-8') as f:
+                  json.dump(data, f, ensure_ascii=False, indent=2)
+              print(f"✅ 已更新 {file}（{len(json.dumps(data, ensure_ascii=False))} 字节）")
+          PYEOF
+
+      - name: 提交并推送到 main
+        run: |
+          if [ -f /tmp/skip ] || git diff --quiet data/; then
+            echo "✅ 数据无变化，跳过 commit，Netlify 不会部署"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/
+          TODAY=$(TZ='Asia/Shanghai' date +%Y-%m-%d)
+          git commit -m "🤖 自动更新 ${TODAY} (${EVENT_TYPE})"
+          git push origin main
+          echo "🚀 已推送到 main，Netlify 即将自动部署"
+        env:
+          EVENT_TYPE: ${{ steps.params.outputs.type }}
