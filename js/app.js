@@ -1,5 +1,43 @@
 /* ===== Rhea Dashboard - App Logic ===== */
 
+// ===== GitHub Raw 数据源（Netlify 跳过部署时，前端直接从 GitHub 读取最新 JSON） =====
+const GH_DATA = {
+  RAW_BASE: 'https://raw.githubusercontent.com/rhea1118/rhea-dashboard/main/data',
+  JSDELIVR_BASE: 'https://cdn.jsdelivr.net/gh/rhea1118/rhea-dashboard@main/data',
+  // 读取简报 JSON（多源回退：GitHub raw → jsDelivr CDN → 本地 API → Netlify 静态文件）
+  async fetchBriefing() {
+    const urls = [
+      this.RAW_BASE + '/daily-brief.json?t=' + Date.now(),
+      this.JSDELIVR_BASE + '/daily-brief.json?t=' + Date.now(),
+      '/api/briefing',
+      'data/daily-brief.json?t=' + Date.now(),
+      'data/briefing.json?t=' + Date.now()
+    ];
+    for (const url of urls) {
+      try {
+        const resp = await fetch(url);
+        if (resp.ok) return await resp.json();
+      } catch(e) { /* 网络错误，尝试下一个 URL */ }
+    }
+    return null;
+  },
+  // 读取学习内容 JSON（多源回退）
+  async fetchLearning() {
+    const urls = [
+      this.RAW_BASE + '/learning.json?t=' + Date.now(),
+      this.JSDELIVR_BASE + '/learning.json?t=' + Date.now(),
+      'data/learning.json?t=' + Date.now()
+    ];
+    for (const url of urls) {
+      try {
+        const resp = await fetch(url);
+        if (resp.ok) return await resp.json();
+      } catch(e) { /* 网络错误，尝试下一个 URL */ }
+    }
+    return null;
+  }
+};
+
 // ===== Storage =====
 const Store = {
   KEY: 'rhea_data_v1',
@@ -430,9 +468,7 @@ App.autoLoadBriefing = async function() {
   const hasToday = saved[today] && saved[today].aiGenerated;
   if (hasToday) return; // 本地已有今天数据，无需加载
   try {
-    const resp = await fetch('/api/briefing');
-    if (!resp.ok) return;
-    const data = await resp.json();
+    const data = await GH_DATA.fetchBriefing();
     if (!data || !data.africa) return;
     const s = Store.get('social_news', {});
     s[today] = {
@@ -521,9 +557,8 @@ App.fetchBriefing = async function() {
     if (generateResp.status === 404) {
       toast('⚠️ 生成服务不可用，尝试读取缓存...');
     }
-    const cacheResp = await fetch('/api/briefing');
-    if (cacheResp.ok) {
-      const data = await cacheResp.json();
+    const data = await GH_DATA.fetchBriefing();
+    if (data && data.africa) {
       const saved = Store.get('social_news', {});
       saved[today] = {
         africa: data.africa || '',
@@ -554,11 +589,10 @@ App.fetchBriefing = async function() {
     console.error('fetchBriefing error:', e);
     // 网络错误：尝试读取缓存
     try {
-      const cacheResp = await fetch('/api/briefing');
-      if (cacheResp.ok) {
-        const data = await cacheResp.json();
+      const cacheData = await GH_DATA.fetchBriefing();
+      if (cacheData && cacheData.africa) {
         const saved = Store.get('social_news', {});
-        saved[today] = { ...data, aiGenerated: true, savedAt: Date.now() };
+        saved[today] = { ...cacheData, aiGenerated: true, savedAt: Date.now() };
         Store.set('social_news', saved);
         toast('📋 生成超时，已加载昨日缓存');
         App.socialTab('news');
@@ -734,22 +768,19 @@ App.socialTopics = function(el) {
   });
 };
 
-App.autoFillTopics = function() {
+App.autoFillTopics = async function() {
   // Try to fetch briefing and get topic suggestions
-  fetch('/api/briefing').then(r => r.json()).then(data => {
-    if (data.topicSuggestions) {
-      const topics = Store.get('social_topics', {});
-      const today = U.today();
-      topics[today] = Object.assign({}, data.topicSuggestions, { _aiGenerated: true });
-      Store.set('social_topics', topics);
-      toast('选题已根据热点自动填充！');
-      App.socialTab('topics');
-    } else {
-      toast('暂无 AI 选题建议，请先点击"AI 生成今日简报"');
-    }
-  }).catch(() => {
-    toast('无法连接服务器');
-  });
+  const data = await GH_DATA.fetchBriefing();
+  if (data && data.topicSuggestions) {
+    const topics = Store.get('social_topics', {});
+    const today = U.today();
+    topics[today] = Object.assign({}, data.topicSuggestions, { _aiGenerated: true });
+    Store.set('social_topics', topics);
+    toast('选题已根据热点自动填充！');
+    App.socialTab('topics');
+  } else {
+    toast('暂无 AI 选题建议，请先点击"AI 生成今日简报"');
+  }
 };
 
 App.clearAiTopics = function() {
@@ -1018,18 +1049,11 @@ App.modules.learning = function(el) {
   App.loadLearningFeed().then(() => App.learnTab('english'));
 };
 
-// ===== 从 GitHub learning-data 分支拉取每日学习推送内容 =====
-// learning.json 只存在 learning-data 分支，不合并到 main，不触发 Netlify 部署
+// ===== 从 GitHub main 分支拉取每日学习推送内容 =====
+// learning.json 由 GitHub Actions 写入 main 分支，前端通过 GitHub raw 读取（Netlify 跳过部署时仍能拿到最新数据）
 App.loadLearningFeed = async function() {
-  const RAW_URL = 'https://raw.githubusercontent.com/rhea1118/rhea-dashboard/learning-data/data/learning.json';
   try {
-    let resp = await fetch(RAW_URL + '?t=' + Date.now());
-    if (!resp.ok) {
-      // 公网不可达时回退到本地文件（开发环境）
-      resp = await fetch('data/learning.json?t=' + Date.now());
-      if (!resp.ok) return;
-    }
-    const feed = await resp.json();
+    const feed = await GH_DATA.fetchLearning();
     if (!feed) return;
     App._learningFeed = feed;
   } catch (e) {
