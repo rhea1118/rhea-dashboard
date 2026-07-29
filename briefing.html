@@ -75,10 +75,24 @@
     async function load() {
       const app = document.getElementById('app');
       try {
-        // 优先读取 daily-brief.json（新规范），回退 briefing.json（兼容旧版）
-        let resp = await fetch('data/daily-brief.json?t=' + Date.now());
-        if (!resp.ok) resp = await fetch('data/briefing.json?t=' + Date.now());
-        if (!resp.ok) throw new Error('加载失败: ' + resp.status);
+        // 优先从 GitHub raw 读取 main 分支最新 JSON（Netlify 跳过部署时仍能拿到最新数据）
+        // 回退顺序：GitHub raw → jsDelivr CDN → Netlify 本地文件
+        const GH_RAW = 'https://raw.githubusercontent.com/rhea1118/rhea-dashboard/main/data';
+        const JSDELIVR = 'https://cdn.jsdelivr.net/gh/rhea1118/rhea-dashboard@main/data';
+        let resp = null;
+        const urls = [
+          GH_RAW + '/daily-brief.json?t=' + Date.now(),
+          JSDELIVR + '/daily-brief.json?t=' + Date.now(),
+          'data/daily-brief.json?t=' + Date.now(),
+          'data/briefing.json?t=' + Date.now()
+        ];
+        for (const url of urls) {
+          try {
+            resp = await fetch(url);
+            if (resp.ok) break;
+          } catch(e) { /* 网络错误，尝试下一个 URL */ }
+        }
+        if (!resp || !resp.ok) throw new Error('所有数据源均不可用');
         const d = await resp.json();
         const suggestions = d.topicSuggestions || {};
         app.innerHTML = `
