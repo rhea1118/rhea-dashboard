@@ -194,8 +194,10 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add data/
           TODAY=$(TZ='Asia/Shanghai' date +%Y-%m-%d)
-          git commit -m "🤖 自动更新 ${TODAY} (${EVENT_TYPE})"
+          # [skip netlify] 让 Netlify 跳过部署，前端通过 GitHub raw URL 读取最新 JSON
+          git commit -m "🤖 自动更新 ${TODAY} (${EVENT_TYPE}) [skip netlify]"
           git push origin main
-          echo "🚀 已推送到 main，Netlify 即将自动部署"
+          echo "🚀 已推送到 main（含 [skip netlify]，Netlify 不会部署）"
+          echo "📱 前端通过 GitHub raw URL 读取最新数据，用户刷新即可看到"
         env:
           EVENT_TYPE: ${{ steps.params.outputs.type }}
