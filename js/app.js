@@ -82,18 +82,59 @@ const U = {
     const target = new Date(date); target.setHours(0,0,0,0);
     return Math.round((target - today) / 86400000);
   },
+  addDays(dateStr, n) {
+    const d = new Date(dateStr);
+    d.setDate(d.getDate() + n);
+    return d.toISOString().slice(0, 10);
+  },
   uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2,7); },
   escape(s) {
     const d = document.createElement('div');
     d.textContent = s || '';
     return d.innerHTML;
   },
-  lunarToSolar(year, month, day) {
-    // Simplified: just return the date as-is for display purposes
-    // Full lunar calendar conversion is complex; we store the original date
+
+  lunarToSolar(year, month, day, isLeap) {
+    const r = Lunar.toSolar(year, month, day, isLeap);
+    return r ? r.y + '-' + String(r.m).padStart(2,'0') + '-' + String(r.d).padStart(2,'0') : null;
+  },
+  solarToLunar(y, m, d) { return Lunar.toLunar(y, m, d); },
+  nextLunarDate(m, d, isLeap) { return Lunar.nextDate(m, d, isLeap); },
+  prevLunarDate(m, d, isLeap) {
+    const t = new Date(); t.setHours(0,0,0,0);
+    for (let y = t.getFullYear(); y >= t.getFullYear() - 3; y--) {
+      if (isLeap && Lunar.leapMonth(y) !== m) continue;
+      const s = Lunar.toSolar(y, m, d, isLeap);
+      if (!s) continue;
+      const dt = new Date(s.y, s.m - 1, s.d);
+      if (dt <= t) return s.y + '-' + String(s.m).padStart(2,'0') + '-' + String(s.d).padStart(2,'0');
+    }
     return null;
-  }
+  },
+  lunarMonthName(m, isLeap) { return Lunar.monthName(m, isLeap); },
+  lunarDayName(d) { return Lunar.dayName(d); }
 };
+
+// ===== Chinese Lunar Calendar (1900-2099) =====
+const Lunar = (function() {
+  const lunarInfo = [0x04bd8,0x04ae0,0x0a570,0x054d5,0x0d260,0x0d950,0x16554,0x056a0,0x09ad0,0x055d2,0x04ae0,0x0a5b6,0x0a4d0,0x0d250,0x1d255,0x0b540,0x0d6a0,0x0ada2,0x095b0,0x14977,0x04970,0x0a4b0,0x0b4b5,0x06a50,0x06d40,0x1ab54,0x02b60,0x09570,0x052f2,0x04970,0x06566,0x0d4a0,0x0ea50,0x06e95,0x05ad0,0x02b60,0x186e3,0x092e0,0x1c8d7,0x0c950,0x0d4a0,0x1d8a6,0x0b550,0x056a0,0x1a5b4,0x025d0,0x092d0,0x0d2b2,0x0a950,0x0b557,0x06ca0,0x0b550,0x15355,0x04da0,0x0a5b0,0x14573,0x052b0,0x0a9a8,0x0e950,0x06aa0,0x0aea6,0x0ab50,0x04b60,0x0aae4,0x0a570,0x05260,0x0f263,0x0d950,0x05b57,0x056a0,0x096d0,0x04dd5,0x04ad0,0x0a4d0,0x0d4d4,0x0d250,0x0d558,0x0b540,0x0b6a0,0x195a6,0x095b0,0x049b0,0x0a974,0x0a4b0,0x0b27a,0x06a50,0x06d40,0x0af46,0x0ab60,0x09570,0x04af5,0x04970,0x064b0,0x074a3,0x0ea50,0x06b58,0x055c0,0x0ab60,0x096d5,0x092e0,0x0c960,0x0d954,0x0d4a0,0x0da50,0x07552,0x056a0,0x0abb7,0x025d0,0x092d0,0x0cab5,0x0a950,0x0b4a0,0x0baa4,0x0ad50,0x055d9,0x04ba0,0x0a5b0,0x15176,0x052b0,0x0a930,0x07954,0x06aa0,0x0ad50,0x05b52,0x04b60,0x0a6e6,0x0a4e0,0x0d260,0x0ea65,0x0d530,0x05aa0,0x076a0,0x096d5,0x04af0,0x04ad0,0x0a4d0,0x1d0b6,0x0d250,0x0d520,0x0dd45,0x0b5a0,0x056d0,0x055b2,0x049b0,0x0a577,0x0a4b0,0x0aa50,0x1b255,0x06d20,0x0ada0,0x14b63,0x09370,0x049f8,0x04970,0x064b0,0x168a6,0x0ea50,0x06b20,0x1a6c4,0x0aae0,0x0a2e0,0x0d2e0,0x0c960,0x0d520,0x0daa0,0x16aa6,0x056d0,0x04ae0,0x0a9d4,0x0a2d0,0x0d150,0x0f252,0x0d520];
+  const months = ['正','二','三','四','五','六','七','八','九','十','冬','腊'];
+  const day1 = ['初','十','廿','三'];
+  const day2 = ['十','一','二','三','四','五','六','七','八','九'];
+  function leapMonth(y){return lunarInfo[y-1900]&0xf;}
+  function leapDays(y){return leapMonth(y)?((lunarInfo[y-1900]&0x10000)?30:29):0;}
+  function monthDays(y,m){return ((lunarInfo[y-1900]&(0x10000>>m))?30:29);}
+  function yearDays(y){let s=348;for(let i=0x8000;i>0x8;i>>=1)s+=(lunarInfo[y-1900]&i)?1:0;return s+leapDays(y);}
+  function monthsOfYear(ly){const lp=leapMonth(ly);const arr=[];for(let m=1;m<=12;m++){arr.push({m,isLeap:false,days:monthDays(ly,m)});if(lp>0&&m===lp)arr.push({m,isLeap:true,days:leapDays(ly)});}return arr;}
+  function toLunar(y,m,d){const base=Date.UTC(1900,0,31);let offset=Math.round((Date.UTC(y,m-1,d)-base)/86400000);let ly=1900;while(offset>=yearDays(ly)){offset-=yearDays(ly);ly++;}const arr=monthsOfYear(ly);let isLeap=false,lm=1;for(const mo of arr){if(offset<mo.days){isLeap=mo.isLeap;lm=mo.m;break;}offset-=mo.days;}return {lYear:ly,lMonth:lm,lDay:offset+1,isLeap};}
+  function toSolar(ly,lm,ld,isLeap){if(ly<1900||ly>2099)return null;let offset=0;for(let i=1900;i<ly;i++)offset+=yearDays(i);const arr=monthsOfYear(ly);let found=false;for(const mo of arr){if(mo.m===lm&&mo.isLeap===isLeap){found=true;break;}offset+=mo.days;}if(!found)return null;offset+=ld-1;const r=new Date(Date.UTC(1900,0,31)+offset*86400000);return {y:r.getUTCFullYear(),m:r.getUTCMonth()+1,d:r.getUTCDate()};}
+  function nextDate(lm,ld,isLeap){const t=new Date();t.setHours(0,0,0,0);for(let y=t.getFullYear();y<=t.getFullYear()+3;y++){if(isLeap&&leapMonth(y)!==lm)continue;const s=toSolar(y,lm,ld,isLeap);if(!s)continue;if(new Date(s.y,s.m-1,s.d)>=t)return s.y+'-'+String(s.m).padStart(2,'0')+'-'+String(s.d).padStart(2,'0');}return null;}
+  function monthName(m,isLeap){return (isLeap?'闰':'')+months[m-1]+'月';}
+  function dayName(d){if(d===10)return '初十';if(d===20)return '二十';if(d===30)return '三十';const t=Math.floor(d/10),o=d%10;return day1[t]+(o===0?'':day2[o]);}
+  function monthLength(y,m,isLeap){return isLeap?leapDays(y):monthDays(y,m);}
+  return {toLunar,toSolar,nextDate,leapMonth,monthName,dayName,monthLength};
+})();
+
 
 // ===== Toast =====
 function toast(msg) {
@@ -111,23 +152,89 @@ const App = {
   current: 'dashboard',
   
   init() {
+    this.restoreNavOrder();
     this.bindNav();
     this.bindSidebar();
     this.updateTopbar();
     this.registerSW();
     this.switch('dashboard');
+    this.syncQuoteTodos();
     // Update time every minute
-    setInterval(() => this.updateTopbar(), 60000);
+    setInterval(() => { this.updateTopbar(); this.syncQuoteTodos(); if (this.current === 'todos') this.renderTodoList(); }, 60000);
   },
   
   bindNav() {
-    document.querySelectorAll('.nav-item').forEach(item => {
-      item.addEventListener('click', (e) => {
-        e.preventDefault();
+    const nav = document.getElementById('sidebarNav');
+    this.saveNavOrder();
+    nav.querySelectorAll('.nav-item').forEach(item => {
+      item.addEventListener('pointerdown', (e) => this._navPointerDown(e, item));
+    });
+  },
+
+  _navPointerDown(e, item) {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    const nav = document.getElementById('sidebarNav');
+    const startX = e.clientX, startY = e.clientY;
+    const THRESHOLD = 6;
+    let dragging = false;
+
+    const onMove = (ev) => {
+      if (!dragging) {
+        if (Math.hypot(ev.clientX - startX, ev.clientY - startY) < THRESHOLD) return;
+        dragging = true;
+        item.classList.add('dragging');
+        nav.classList.add('is-dragging');
+      }
+      ev.preventDefault();
+      const after = this.getDragAfterElement(nav, ev.clientY);
+      if (after == null) nav.appendChild(item);
+      else if (after !== item) nav.insertBefore(item, after);
+    };
+    const onUp = (ev) => {
+      try { item.releasePointerCapture(ev.pointerId); } catch (_) {}
+      item.removeEventListener('pointermove', onMove);
+      item.removeEventListener('pointerup', onUp);
+      item.removeEventListener('pointercancel', onUp);
+      if (dragging) {
+        item.classList.remove('dragging');
+        nav.classList.remove('is-dragging');
+        this.saveNavOrder();
+        toast('已保存导航顺序');
+      } else {
         this.switch(item.dataset.module);
         if (window.innerWidth <= 768) this.closeSidebar();
-      });
-    });
+      }
+    };
+    try { item.setPointerCapture(e.pointerId); } catch (_) {}
+    item.addEventListener('pointermove', onMove);
+    item.addEventListener('pointerup', onUp);
+    item.addEventListener('pointercancel', onUp);
+  },
+
+  restoreNavOrder() {
+    const order = Store.get('navOrder', null);
+    if (!order || !Array.isArray(order)) return;
+    const nav = document.getElementById('sidebarNav');
+    const items = [...nav.querySelectorAll('.nav-item')];
+    const byModule = {};
+    items.forEach(it => byModule[it.dataset.module] = it);
+    order.forEach(mod => { const it = byModule[mod]; if (it) nav.appendChild(it); });
+    items.forEach(it => { if (!order.includes(it.dataset.module)) nav.appendChild(it); });
+  },
+
+  saveNavOrder() {
+    const order = [...document.querySelectorAll('#sidebarNav .nav-item')].map(el => el.dataset.module);
+    Store.set('navOrder', order);
+  },
+
+  getDragAfterElement(container, y) {
+    const els = [...container.querySelectorAll('.nav-item:not(.dragging)')];
+    return els.reduce((closest, child) => {
+      const box = child.getBoundingClientRect();
+      const offset = y - box.top - box.height / 2;
+      if (offset < 0 && offset > closest.offset) return { offset, element: child };
+      return closest;
+    }, { offset: -Infinity, element: null }).element;
   },
   
   bindSidebar() {
@@ -161,7 +268,7 @@ const App = {
     document.querySelectorAll('.nav-item').forEach(i => i.classList.toggle('active', i.dataset.module === module));
     const titles = {
       dashboard: '首页概览', todos: '每日待办', social: '外贸运营', learning: '学习阅读',
-      expenses: '收支记账', health: '减脂记录', schedule: '日程安排', anniversaries: '纪念日', periods: '经期记录'
+      customers: '客户进展', health: '减脂记录', schedule: '日程安排', anniversaries: '纪念日', periods: '经期记录'
     };
     document.getElementById('pageTitle').textContent = titles[module] || '';
     const area = document.getElementById('contentArea');
@@ -187,14 +294,10 @@ const App = {
 App.modules.dashboard = function(el) {
   const todos = Store.get('todos', []);
   const todayTodos = todos.filter(t => t.date === U.today() && !t.completed);
-  const expenses = Store.get('expenses', []);
-  const now = new Date();
-  const monthExp = expenses.filter(e => {
-    const d = new Date(e.date);
-    return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-  });
-  const monthIncome = monthExp.filter(e => e.type === 'income').reduce((s, e) => s + e.amount, 0);
-  const monthExpense = monthExp.filter(e => e.type === 'expense').reduce((s, e) => s + e.amount, 0);
+  const custQuote = Store.get('custQuote', []);
+  const custKey = Store.get('custKey', []);
+  const today = U.today();
+  const pendingQuotes = custQuote.filter(q => q.nextFollow && q.nextFollow <= today).length;
   
   const schedule = Store.get('schedule', []);
   const todaySched = schedule.filter(s => s.date === U.today()).sort((a, b) => (a.time || '').localeCompare(b.time || ''));
@@ -226,14 +329,14 @@ App.modules.dashboard = function(el) {
         <span class="stat-sub">共 ${todos.filter(t => t.date === U.today()).length} 项</span>
       </div>
       <div class="stat-card">
-        <span class="stat-label">本月收入</span>
-        <span class="stat-value success">${U.fmtMoney(monthIncome)}</span>
-        <span class="stat-sub">支出 ${U.fmtMoney(monthExpense)}</span>
+        <span class="stat-label">待跟进报价</span>
+        <span class="stat-value ${pendingQuotes > 0 ? 'danger' : 'success'}">${pendingQuotes}</span>
+        <span class="stat-sub">${pendingQuotes > 0 ? '需跟进' : '暂无'}</span>
       </div>
       <div class="stat-card">
-        <span class="stat-label">本月结余</span>
-        <span class="stat-value ${monthIncome - monthExpense >= 0 ? 'success' : 'danger'}">${U.fmtMoney(monthIncome - monthExpense)}</span>
-        <span class="stat-sub">${now.getMonth()+1}月数据</span>
+        <span class="stat-label">重点客户</span>
+        <span class="stat-value primary">${custKey.length}</span>
+        <span class="stat-sub">共 ${custKey.length} 个</span>
       </div>
       <div class="stat-card">
         <span class="stat-label">今日日程</span>
@@ -328,8 +431,10 @@ App.weekCount = function(arr) {
    MODULE: Todos
    ============================================================ */
 App.modules.todos = function(el) {
+  App.syncQuoteTodos();
   const todos = Store.get('todos', []);
   const today = U.today();
+  const doneCount = todos.filter(t => t.completed).length;
   let filter = 'all'; // all, work, life, today
   
   el.innerHTML = `
@@ -359,10 +464,12 @@ App.modules.todos = function(el) {
         <button class="filter-tab" data-filter="today" onclick="App.filterTodos('today')">今日</button>
         <button class="filter-tab" data-filter="work" onclick="App.filterTodos('work')">工作</button>
         <button class="filter-tab" data-filter="life" onclick="App.filterTodos('life')">生活</button>
+        ${doneCount > 0 ? `<button class="filter-toggle" id="todoShowDone" onclick="App.toggleShowCompleted()">显示已完成 (${doneCount})</button>` : ''}
       </div>
       <div id="todoList"></div>
     </div>
   `;
+  App._showCompleted = App._showCompleted === undefined ? false : App._showCompleted;
   App._todoFilter = 'all';
   App.renderTodoList();
 };
@@ -376,18 +483,46 @@ App.filterTodos = function(f) {
 App.renderTodoList = function() {
   const todos = Store.get('todos', []);
   const f = App._todoFilter || 'all';
+  const showCompleted = !!App._showCompleted;
   let list = todos.slice().sort((a, b) => (a.completed - b.completed) || (b.date < a.date ? -1 : 1));
+  if (!showCompleted) list = list.filter(t => !t.completed);
   if (f === 'today') list = list.filter(t => t.date === U.today());
   if (f === 'work') list = list.filter(t => t.category === 'work');
   if (f === 'life') list = list.filter(t => t.category === 'life');
-  
+
   const container = document.getElementById('todoList');
   if (!container) return;
   if (list.length === 0) {
-    container.innerHTML = '<div class="empty-state"><p>暂无待办事项</p></div>';
+    const hasDone = todos.some(t => t.completed);
+    if (!showCompleted && hasDone) {
+      container.innerHTML = '<div class="empty-state"><p>已完成的待办已隐藏</p><button class="btn btn-soft btn-sm mt-12" onclick="App.toggleShowCompleted()">显示已完成 →</button></div>';
+    } else {
+      container.innerHTML = '<div class="empty-state"><p>暂无待办事项</p></div>';
+    }
     return;
   }
-  container.innerHTML = list.map(t => `
+  const editingId = App._editingTodoId;
+  container.innerHTML = list.map(t => {
+    if (t.id === editingId) {
+      return `
+    <div class="todo-item todo-editing">
+      <div class="todo-edit-form">
+        <input type="text" class="todo-edit-input" id="editText_${t.id}" value="${U.escape(t.text)}" placeholder="待办内容..." onkeydown="if(event.key==='Enter')App.saveTodoEdit('${t.id}');if(event.key==='Escape')App.cancelTodoEdit()">
+        <div class="todo-edit-row">
+          <select id="editCat_${t.id}">
+            <option value="work" ${t.category==='work'?'selected':''}>工作</option>
+            <option value="life" ${t.category==='life'?'selected':''}>生活</option>
+          </select>
+          <input type="date" id="editDate_${t.id}" value="${t.date || U.today()}">
+          <div class="todo-edit-actions">
+            <button class="btn btn-primary btn-sm" onclick="App.saveTodoEdit('${t.id}')">保存</button>
+            <button class="btn btn-soft btn-sm" onclick="App.cancelTodoEdit()">取消</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+    }
+    return `
     <div class="todo-item ${t.completed ? 'completed' : ''}">
       <div class="todo-checkbox ${t.completed ? 'checked' : ''}" onclick="App.toggleTodo('${t.id}')"></div>
       <div class="todo-content">
@@ -398,12 +533,45 @@ App.renderTodoList = function() {
         </div>
       </div>
       <div class="todo-actions">
-        <button class="todo-delete" onclick="App.deleteTodo('${t.id}')">
+        <button class="todo-edit" title="编辑" onclick="App.editTodo('${t.id}')">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+        </button>
+        <button class="todo-delete" title="删除" onclick="App.deleteTodo('${t.id}')">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
         </button>
       </div>
-    </div>
-  `).join('');
+    </div>`;
+  }).join('');
+
+  if (editingId) {
+    const inp = document.getElementById('editText_' + editingId);
+    if (inp) { inp.focus(); inp.select(); }
+  }
+};
+
+App.syncQuoteTodos = function() {
+  const quotes = Store.get('custQuote', []);
+  const todos = Store.get('todos', []);
+  const today = U.today();
+  let changed = false;
+  quotes.forEach(q => {
+    if (!q.nextFollow || q.nextFollow > today) return;
+    const src = 'quote:' + q.id;
+    const text = '跟进报价客户：' + q.title + (q.phone ? '（' + q.phone + '）' : '');
+    const existing = todos.find(t => t.source === src);
+    if (existing) {
+      if (existing.date !== q.nextFollow || existing.text !== text) {
+        existing.date = q.nextFollow;
+        existing.text = text;
+        existing.completed = false;
+        changed = true;
+      }
+    } else {
+      todos.push({ id: U.uid(), text, category: 'work', date: q.nextFollow, completed: false, created: Date.now(), source: src });
+      changed = true;
+    }
+  });
+  if (changed) Store.set('todos', todos);
 };
 
 App.addTodo = function() {
@@ -429,8 +597,49 @@ App.deleteTodo = function(id) {
   let todos = Store.get('todos', []);
   todos = todos.filter(t => t.id !== id);
   Store.set('todos', todos);
+  if (App._editingTodoId === id) App._editingTodoId = null;
   App.renderTodoList();
   toast('已删除');
+};
+
+App.editTodo = function(id) {
+  App._editingTodoId = id;
+  App.renderTodoList();
+};
+
+App.cancelTodoEdit = function() {
+  App._editingTodoId = null;
+  App.renderTodoList();
+};
+
+App.toggleShowCompleted = function() {
+  App._showCompleted = !App._showCompleted;
+  const btn = document.getElementById('todoShowDone');
+  if (btn) btn.classList.toggle('on', App._showCompleted);
+  App.renderTodoList();
+};
+
+App.saveTodoEdit = function(id) {
+  const textEl = document.getElementById('editText_' + id);
+  const catEl = document.getElementById('editCat_' + id);
+  const dateEl = document.getElementById('editDate_' + id);
+  if (!textEl) return;
+  const text = textEl.value.trim();
+  const cat = catEl ? catEl.value : 'work';
+  const date = (dateEl && dateEl.value) ? dateEl.value : U.today();
+  if (!text) { toast('请输入待办内容'); textEl.focus(); return; }
+  const todos = Store.get('todos', []);
+  const t = todos.find(t => t.id === id);
+  if (t) {
+    t.text = text;
+    t.category = cat;
+    t.date = date;
+    t.updated = Date.now();
+    Store.set('todos', todos);
+  }
+  App._editingTodoId = null;
+  App.renderTodoList();
+  toast('已保存修改');
 };
 
 /* ============================================================
@@ -1182,158 +1391,6 @@ App.delLearn = function(tab, id) {
 };
 
 /* ============================================================
-   MODULE: Expenses
-   ============================================================ */
-App.modules.expenses = function(el) {
-  const records = Store.get('expenses', []);
-  const now = new Date();
-  const monthRec = records.filter(r => r.date.slice(0, 7) === `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`);
-  const yearRec = records.filter(r => r.date.slice(0, 4) === String(now.getFullYear()));
-  const monthIn = monthRec.filter(r => r.type === 'income').reduce((s, r) => s + r.amount, 0);
-  const monthOut = monthRec.filter(r => r.type === 'expense').reduce((s, r) => s + r.amount, 0);
-  const yearIn = yearRec.filter(r => r.type === 'income').reduce((s, r) => s + r.amount, 0);
-  const yearOut = yearRec.filter(r => r.type === 'expense').reduce((s, r) => s + r.amount, 0);
-  
-  el.innerHTML = `
-    <div class="grid-4">
-      <div class="stat-card"><span class="stat-label">本月收入</span><span class="stat-value success">${U.fmtMoney(monthIn)}</span></div>
-      <div class="stat-card"><span class="stat-label">本月支出</span><span class="stat-value danger">${U.fmtMoney(monthOut)}</span></div>
-      <div class="stat-card"><span class="stat-label">本月结余</span><span class="stat-value ${monthIn-monthOut>=0?'success':'danger'}">${U.fmtMoney(monthIn-monthOut)}</span></div>
-      <div class="stat-card"><span class="stat-label">本年结余</span><span class="stat-value ${yearIn-yearOut>=0?'success':'danger'}">${U.fmtMoney(yearIn-yearOut)}</span></div>
-    </div>
-    <div class="card mt-16">
-      <div class="card-title"><span class="icon-dot"></span>记一笔</div>
-      <div class="form-row">
-        <div class="form-group" style="flex:1;min-width:100px">
-          <label>类型</label>
-          <select id="ie_type">
-            <option value="expense">支出</option>
-            <option value="income">收入</option>
-          </select>
-        </div>
-        <div class="form-group" style="flex:1;min-width:100px">
-          <label>日期</label>
-          <input type="date" id="ie_date" value="${U.today()}">
-        </div>
-        <div class="form-group" style="flex:1;min-width:100px">
-          <label>类别</label>
-          <select id="ie_cat">
-            <optgroup label="支出">
-              <option value="餐饮">餐饮</option>
-              <option value="交通">交通</option>
-              <option value="购物">购物</option>
-              <option value="生活">生活</option>
-              <option value="娱乐">娱乐</option>
-              <option value="医疗">医疗</option>
-              <option value="教育">教育</option>
-              <option value="其他支出">其他</option>
-            </optgroup>
-            <optgroup label="收入">
-              <option value="工资">工资</option>
-              <option value="兼职">兼职</option>
-              <option value="投资">投资</option>
-              <option value="其他收入">其他</option>
-            </optgroup>
-          </select>
-        </div>
-        <div class="form-group" style="flex:1;min-width:100px">
-          <label>金额</label>
-          <input type="number" id="ie_amount" placeholder="0.00" step="0.01">
-        </div>
-        <div class="form-group" style="flex:2">
-          <label>备注</label>
-          <input type="text" id="ie_note" placeholder="备注（可选）">
-        </div>
-        <div style="display:flex;align-items:flex-end">
-          <button class="btn btn-primary" onclick="App.addExpense()">记一笔</button>
-        </div>
-      </div>
-    </div>
-    <div class="grid-2 mt-16">
-      <div class="card">
-        <div class="card-title"><span class="icon-dot"></span>本月支出分类</div>
-        <div id="expenseChart"></div>
-      </div>
-      <div class="card">
-        <div class="card-title"><span class="icon-dot"></span>收支记录</div>
-        <div id="expenseRecords"></div>
-      </div>
-    </div>
-  `;
-  App.renderExpenseChart();
-  App.renderExpenseRecords();
-};
-
-App.addExpense = function() {
-  const records = Store.get('expenses', []);
-  const amount = +document.getElementById('ie_amount').value;
-  if (!amount || amount <= 0) { toast('请输入有效金额'); return; }
-  records.push({
-    id: U.uid(),
-    type: document.getElementById('ie_type').value,
-    date: document.getElementById('ie_date').value,
-    category: document.getElementById('ie_cat').value,
-    amount,
-    note: document.getElementById('ie_note').value,
-    created: Date.now()
-  });
-  Store.set('expenses', records);
-  document.getElementById('ie_amount').value = '';
-  document.getElementById('ie_note').value = '';
-  App.modules.expenses(document.getElementById('contentArea'));
-  toast('记账成功');
-};
-
-App.renderExpenseChart = function() {
-  const records = Store.get('expenses', []);
-  const now = new Date();
-  const monthKey = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
-  const monthExp = records.filter(r => r.type === 'expense' && r.date.slice(0, 7) === monthKey);
-  const cats = {};
-  monthExp.forEach(r => { cats[r.category] = (cats[r.category] || 0) + r.amount; });
-  const sorted = Object.entries(cats).sort((a, b) => b[1] - a[1]);
-  const total = sorted.reduce((s, [, v]) => s + v, 0);
-  const c = document.getElementById('expenseChart');
-  if (!c) return;
-  if (sorted.length === 0) { c.innerHTML = '<div class="empty-state"><p>本月暂无支出</p></div>'; return; }
-  const colors = ['#6B8AFE', '#8B7FE8', '#93B4FF', '#B4A9F5', '#F59E0B', '#10B981', '#EF4444', '#6366F1'];
-  c.innerHTML = sorted.map(([cat, amt], i) => {
-    const pct = (amt / total * 100).toFixed(1);
-    return `<div class="mb-8">
-      <div class="flex justify-between text-sm mb-8"><span>${cat}</span><span class="font-bold">${U.fmtMoney(amt)} (${pct}%)</span></div>
-      <div style="background:var(--bg-soft);height:8px;border-radius:4px;overflow:hidden">
-        <div style="width:${pct}%;height:100%;background:${colors[i % colors.length]};border-radius:4px;transition:width 0.5s"></div>
-      </div>
-    </div>`;
-  }).join('') + `<div class="text-center mt-12 text-sm text-light">本月总支出 ${U.fmtMoney(total)}</div>`;
-};
-
-App.renderExpenseRecords = function() {
-  const records = Store.get('expenses', []).slice().reverse().slice(0, 20);
-  const c = document.getElementById('expenseRecords');
-  if (!c) return;
-  if (records.length === 0) { c.innerHTML = '<div class="empty-state"><p>暂无记录</p></div>'; return; }
-  c.innerHTML = records.map(r => `
-    <div class="ie-entry">
-      <div class="ie-entry-date">${U.fmtDate(r.date)}</div>
-      <div class="ie-entry-cat">${U.escape(r.category)}${r.note ? '<br><span class="text-sm text-light">' + U.escape(r.note) + '</span>' : ''}</div>
-      <div class="ie-entry-amount ${r.type}">${r.type === 'income' ? '+' : '-'}${U.fmtMoney(r.amount)}</div>
-      <button class="todo-delete" onclick="App.delExpense('${r.id}')">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/></svg>
-      </button>
-    </div>
-  `).join('');
-};
-
-App.delExpense = function(id) {
-  let records = Store.get('expenses', []);
-  records = records.filter(r => r.id !== id);
-  Store.set('expenses', records);
-  App.modules.expenses(document.getElementById('contentArea'));
-  toast('已删除');
-};
-
-/* ============================================================
    MODULE: Health (Fat Loss)
    ============================================================ */
 App.modules.health = function(el) {
@@ -1497,7 +1554,43 @@ App.modules.schedule = function(el) {
   const today = U.today();
   const todayList = records.filter(r => r.date === today);
   const upcoming = records.filter(r => r.date > today).slice(0, 10);
-  
+
+  const PENCIL = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>';
+
+  const rowHtml = (s, isToday) => {
+    if (App._editingScheduleId === s.id) {
+      const p = 'se_' + s.id;
+      return `
+      <div class="sched-entry sched-editing">
+        <div class="todo-edit-form">
+          <div class="todo-edit-row">
+            <input type="date" id="${p}_date" value="${s.date}">
+            <input type="time" id="${p}_time" value="${s.time || ''}">
+          </div>
+          <input class="todo-edit-input" id="${p}_title" value="${U.escape(s.title)}" placeholder="日程标题" onkeydown="if(event.key==='Enter')App.saveSchedule('${s.id}');if(event.key==='Escape')App.cancelScheduleEdit()">
+          <input class="todo-edit-input" id="${p}_desc" value="${U.escape(s.desc || '')}" placeholder="描述（可选）">
+          <div class="todo-edit-actions">
+            <button class="btn btn-primary" onclick="App.saveSchedule('${s.id}')">保存</button>
+            <button class="btn btn-ghost" onclick="App.cancelScheduleEdit()">取消</button>
+          </div>
+        </div>
+      </div>`;
+    }
+    return `
+      <div class="sched-entry">
+        <div class="sched-time"><div class="time">${s.time || '全天'}</div>${isToday ? '' : `<div class="date">${U.fmtDate(s.date)}</div>`}</div>
+        <div class="sched-content">
+          <div class="title">${U.escape(s.title)}</div>
+          ${s.desc ? `<div class="desc">${U.escape(s.desc)}</div>` : ''}
+        </div>
+        ${isToday ? '' : `<div class="text-right text-sm text-light">${U.daysUntil(s.date)}天后</div>`}
+        <button class="todo-edit" onclick="App.editSchedule('${s.id}')">${PENCIL}</button>
+        <button class="todo-delete" onclick="App.delSchedule('${s.id}')">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/></svg>
+        </button>
+      </div>`;
+  };
+
   el.innerHTML = `
     <div class="card">
       <div class="card-title"><span class="icon-dot"></span>添加日程</div>
@@ -1526,37 +1619,11 @@ App.modules.schedule = function(el) {
     ${todayList.length > 0 ? `
     <div class="card">
       <div class="card-title"><span class="icon-dot"></span>今日日程</div>
-      ${todayList.map(s => `
-        <div class="sched-entry">
-          <div class="sched-time"><div class="time">${s.time || '全天'}</div></div>
-          <div class="sched-content">
-            <div class="title">${U.escape(s.title)}</div>
-            ${s.desc ? `<div class="desc">${U.escape(s.desc)}</div>` : ''}
-          </div>
-          <button class="todo-delete" onclick="App.delSchedule('${s.id}')">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/></svg>
-          </button>
-        </div>
-      `).join('')}
+      ${todayList.map(s => rowHtml(s, true)).join('')}
     </div>` : ''}
     <div class="card">
       <div class="card-title"><span class="icon-dot"></span>即将到来</div>
-      ${upcoming.length > 0 ? upcoming.map(s => `
-        <div class="sched-entry">
-          <div class="sched-time">
-            <div class="time">${s.time || '全天'}</div>
-            <div class="date">${U.fmtDate(s.date)}</div>
-          </div>
-          <div class="sched-content">
-            <div class="title">${U.escape(s.title)}</div>
-            ${s.desc ? `<div class="desc">${U.escape(s.desc)}</div>` : ''}
-          </div>
-          <div class="text-right text-sm text-light">${U.daysUntil(s.date)}天后</div>
-          <button class="todo-delete" onclick="App.delSchedule('${s.id}')">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/></svg>
-          </button>
-        </div>
-      `).join('') : '<div class="empty-state"><p>暂无即将到来的日程</p></div>'}
+      ${upcoming.length > 0 ? upcoming.map(s => rowHtml(s, false)).join('') : '<div class="empty-state"><p>暂无即将到来的日程</p></div>'}
     </div>
   `;
 };
@@ -1579,6 +1646,33 @@ App.addSchedule = function() {
   toast('日程已添加');
 };
 
+App.editSchedule = function(id) {
+  this._editingScheduleId = id;
+  this.modules.schedule(document.getElementById('contentArea'));
+};
+
+App.cancelScheduleEdit = function() {
+  this._editingScheduleId = null;
+  this.modules.schedule(document.getElementById('contentArea'));
+};
+
+App.saveSchedule = function(id) {
+  const records = Store.get('schedule', []);
+  const rec = records.find(r => r.id === id);
+  if (!rec) return;
+  const p = 'se_' + id;
+  const title = document.getElementById(p + '_title').value.trim();
+  if (!title) { toast('请输入日程标题'); return; }
+  rec.date = document.getElementById(p + '_date').value;
+  rec.time = document.getElementById(p + '_time').value;
+  rec.title = title;
+  rec.desc = document.getElementById(p + '_desc').value;
+  Store.set('schedule', records);
+  this._editingScheduleId = null;
+  App.modules.schedule(document.getElementById('contentArea'));
+  toast('已保存修改');
+};
+
 App.delSchedule = function(id) {
   let records = Store.get('schedule', []);
   records = records.filter(r => r.id !== id);
@@ -1594,9 +1688,88 @@ App.modules.anniversaries = function(el) {
   const records = Store.get('anniversaries', []);
   const withCountdown = records.map(a => {
     const next = App.nextAnniversaryDate(a);
-    return { ...a, daysUntil: U.daysUntil(next), nextDate: next };
+    const prev = App.prevAnniversaryDate(a);
+    return { ...a, daysUntil: U.daysUntil(next), daysSince: U.daysBetween(prev, U.today()), nextDate: next };
   }).sort((a, b) => a.daysUntil - b.daysUntil);
-  
+
+  const PENCIL = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>';
+
+  const lunarSelectHtml = (p, isLunar) => `<select id="${p}_lunar" onchange="App.toggleAnnivCalendar('${p}')"><option value="false"${!isLunar ? ' selected' : ''}>公历</option><option value="true"${isLunar ? ' selected' : ''}>农历</option></select>`;
+  const lunarPickerHtml = (p, show) => `<div class="lunar-picker" id="${p}_lunarPicker" style="display:${show ? 'block' : 'none'}"><div class="lunar-picker-row"><select id="${p}_lyear"></select><select id="${p}_lmonth"></select><select id="${p}_lday"></select></div><div class="lunar-picker-hint" id="${p}_lunarSolar"></div></div>`;
+
+  const dateDisplay = (a) => (a.isLunar && a.lunar)
+    ? '农历 ' + U.lunarMonthName(a.lunar.m, a.lunar.isLeap) + U.lunarDayName(a.lunar.d)
+    : a.date;
+
+  const typeLabel = (t) => t === 'birthday' ? '生日' : t === 'countdown' ? '倒数日' : '纪念日';
+  const typeIcon = (t) => t === 'birthday' ? '🎂' : t === 'countdown' ? '⏳' : '💝';
+  const typeColor = (t) => t === 'birthday'
+    ? { bg: '#FEF3C7', fg: '#D97706' }
+    : t === 'countdown'
+    ? { bg: '#CCFBF1', fg: '#0D9488' }
+    : { bg: '#E0E7FF', fg: '#6366F1' };
+
+  const countHtml = (a) => {
+    if (a.type === 'countdown') {
+      const u = a.daysUntil;
+      const txt = u > 0 ? u + ' 天后' : u === 0 ? '就是今天' : '已过 ' + (-u) + ' 天';
+      return `<div class="anni-count-item anni-count-wide">
+        <span class="anni-count-label">倒数日</span>
+        <span class="anni-count-val">${txt}</span>
+      </div>`;
+    }
+    return `<div class="anni-count-item">
+        <span class="anni-count-label">正数日</span>
+        <span class="anni-count-val">${a.daysSince === 0 ? '今天' : a.daysSince + ' 天'}</span>
+      </div>
+      <div class="anni-count-item">
+        <span class="anni-count-label">倒数日</span>
+        <span class="anni-count-val">${a.daysUntil === 0 ? '今天' : a.daysUntil + ' 天'}</span>
+      </div>`;
+  };
+
+  const rowHtml = (a) => {
+    if (App._editingAnnivId === a.id) {
+      const p = 'ae_' + a.id;
+      const isLunar = !!a.isLunar;
+      return `
+      <div class="anni-entry anni-editing">
+        <div class="todo-edit-form">
+          <input class="todo-edit-input" id="${p}_name" value="${U.escape(a.name)}" placeholder="名称">
+          <div class="todo-edit-row">
+            <select id="${p}_type">
+              <option value="birthday"${a.type === 'birthday' ? ' selected' : ''}>生日</option>
+              <option value="anniversary"${a.type === 'anniversary' ? ' selected' : ''}>纪念日</option>
+              <option value="countdown"${a.type === 'countdown' ? ' selected' : ''}>倒数日</option>
+            </select>
+            ${lunarSelectHtml(p, isLunar)}
+          </div>
+          <input type="date" id="${p}_date" value="${a.date}" style="display:${isLunar ? 'none' : ''}">
+          ${lunarPickerHtml(p, isLunar)}
+          <div class="todo-edit-actions">
+            <button class="btn btn-primary" onclick="App.saveAnniversary('${a.id}')">保存</button>
+            <button class="btn btn-ghost" onclick="App.cancelAnnivEdit()">取消</button>
+          </div>
+        </div>
+      </div>`;
+    }
+    return `
+      <div class="anni-entry">
+        <div class="anni-icon" style="background:${typeColor(a.type).bg};color:${typeColor(a.type).fg}">${typeIcon(a.type)}</div>
+        <div class="anni-info">
+          <div class="anni-name">${U.escape(a.name)}</div>
+          <div class="anni-date">${dateDisplay(a)}（${typeLabel(a.type)}）</div>
+        </div>
+        <div class="anni-count">
+          ${countHtml(a)}
+        </div>
+        <button class="todo-edit" onclick="App.editAnniversary('${a.id}')">${PENCIL}</button>
+        <button class="todo-delete" onclick="App.delAnniversary('${a.id}')">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/></svg>
+        </button>
+      </div>`;
+  };
+
   el.innerHTML = `
     <div class="card">
       <div class="card-title"><span class="icon-dot"></span>添加纪念日/生日</div>
@@ -1610,49 +1783,53 @@ App.modules.anniversaries = function(el) {
           <select id="a_type">
             <option value="birthday">生日</option>
             <option value="anniversary">纪念日</option>
+            <option value="countdown">倒数日</option>
           </select>
         </div>
         <div class="form-group" style="flex:1;min-width:120px">
           <label>日期</label>
           <input type="date" id="a_date">
-        </div>
-        <div class="form-group" style="flex:1">
-          <label>历法</label>
-          <select id="a_lunar">
-            <option value="false">公历</option>
-            <option value="true">农历</option>
-          </select>
+          <div class="mt-8">${lunarSelectHtml('a', false)}</div>
+          ${lunarPickerHtml('a', false)}
         </div>
         <div style="display:flex;align-items:flex-end">
           <button class="btn btn-primary" onclick="App.addAnniversary()">添加</button>
         </div>
       </div>
-      <p class="text-sm text-light">提示：提前3天会提醒你哦！</p>
+      <p class="text-sm text-light">提示：选择「农历」后日期将切换为农历日历；提前3天会提醒你哦！</p>
     </div>
     <div class="card">
       <div class="card-title"><span class="icon-dot"></span>纪念日列表</div>
-      ${withCountdown.length > 0 ? withCountdown.map(a => `
-        <div class="anni-entry">
-          <div class="anni-icon" style="background:${a.type === 'birthday' ? '#FEF3C7' : '#E0E7FF'};color:${a.type === 'birthday' ? '#D97706' : '#6366F1'}">${a.type === 'birthday' ? '🎂' : '💝'}</div>
-          <div class="anni-info">
-            <div class="anni-name">${U.escape(a.name)}</div>
-            <div class="anni-date">${a.isLunar ? '农历 ' : ''}${a.date}（${a.type === 'birthday' ? '生日' : '纪念日'}）</div>
-          </div>
-          <div class="anni-countdown">
-            ${a.daysUntil === 0 ? '<strong>今天</strong><div class="text-light text-sm">就是今天！</div>' :
-              a.daysUntil > 0 ? `<strong>${a.daysUntil}</strong><div class="text-light text-sm">天后</div>` :
-              `<strong>${-a.daysUntil}</strong><div class="text-light text-sm">天前</div>`}
-          </div>
-          <button class="todo-delete" onclick="App.delAnniversary('${a.id}')">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/></svg>
-          </button>
-        </div>
-      `).join('') : '<div class="empty-state"><p>暂无纪念日记录</p></div>'}
+      ${withCountdown.length > 0 ? withCountdown.map(rowHtml).join('') : '<div class="empty-state"><p>暂无纪念日记录</p></div>'}
     </div>
   `;
+
+  if (App._editingAnnivId) {
+    const rec = records.find(r => r.id === App._editingAnnivId);
+    if (rec && rec.isLunar) App.initAnnivPicker('ae_' + rec.id, rec.lunar || null);
+  }
+};
+
+App.prevAnniversaryDate = function(a) {
+  if (a.type === 'countdown') return a.date; // 倒数日：固定目标，不按年回滚
+  if (a.isLunar && a.lunar) {
+    const pd = U.prevLunarDate(a.lunar.m, a.lunar.d, a.lunar.isLeap);
+    if (pd) return pd;
+  }
+  const now = new Date(); now.setHours(0,0,0,0);
+  const [y, m, d] = a.date.split('-').map(Number);
+  let next = new Date(now.getFullYear(), m - 1, d);
+  if (next < now) next = new Date(now.getFullYear() + 1, m - 1, d);
+  const prev = new Date(next.getFullYear() - 1, m - 1, d);
+  return prev.toISOString().slice(0, 10);
 };
 
 App.nextAnniversaryDate = function(a) {
+  if (a.type === 'countdown') return a.date; // 倒数日：固定目标，不按年滚动
+  if (a.isLunar && a.lunar) {
+    const nd = U.nextLunarDate(a.lunar.m, a.lunar.d, a.lunar.isLeap);
+    if (nd) return nd;
+  }
   const now = new Date();
   const [y, m, d] = a.date.split('-').map(Number);
   let next = new Date(now.getFullYear(), m - 1, d);
@@ -1660,23 +1837,134 @@ App.nextAnniversaryDate = function(a) {
   return next.toISOString().slice(0, 10);
 };
 
+App.toggleAnnivCalendar = function(prefix) {
+  const sel = document.getElementById(prefix + '_lunar');
+  if (!sel) return;
+  const isLunar = sel.value === 'true';
+  const dateEl = document.getElementById(prefix + '_date');
+  const picker = document.getElementById(prefix + '_lunarPicker');
+  if (isLunar) {
+    if (dateEl) dateEl.style.display = 'none';
+    if (picker) picker.style.display = 'block';
+    this.initAnnivPicker(prefix, null);
+  } else {
+    if (dateEl) dateEl.style.display = '';
+    if (picker) picker.style.display = 'none';
+  }
+};
+
+App.initAnnivPicker = function(prefix, sel) {
+  const ySel = document.getElementById(prefix + '_lyear');
+  const mSel = document.getElementById(prefix + '_lmonth');
+  const dSel = document.getElementById(prefix + '_lday');
+  if (!ySel || !mSel || !dSel) return;
+  const cur = new Date().getFullYear();
+  const startY = Math.max(1900, cur - 100), endY = cur;
+
+  const fillMonths = (cm, cl) => {
+    const y = +ySel.value;
+    const lp = Lunar.leapMonth(y);
+    mSel.innerHTML = '';
+    for (let m = 1; m <= 12; m++) {
+      const o = document.createElement('option'); o.value = m; o.textContent = Lunar.monthName(m, false); mSel.appendChild(o);
+      if (lp > 0 && m === lp) { const lo = document.createElement('option'); lo.value = m; lo.dataset.leap = '1'; lo.textContent = Lunar.monthName(m, true); mSel.appendChild(lo); }
+    }
+    for (const o of mSel.options) { if (+o.value === cm && (o.dataset.leap === '1') === !!cl) { o.selected = true; break; } }
+  };
+  const fillDays = (cd) => {
+    const mOpt = mSel.selectedOptions[0];
+    const m = +mOpt.value, isLeap = mOpt.dataset.leap === '1';
+    const len = Lunar.monthLength(+ySel.value, m, isLeap);
+    dSel.innerHTML = '';
+    for (let d = 1; d <= len; d++) { const o = document.createElement('option'); o.value = d; o.textContent = Lunar.dayName(d); dSel.appendChild(o); }
+    dSel.value = cd > len ? len : cd;
+  };
+  const updateSolar = () => {
+    const mOpt = mSel.selectedOptions[0];
+    const m = +mOpt.value, isLeap = mOpt.dataset.leap === '1', d = +dSel.value;
+    const s = Lunar.toSolar(+ySel.value, m, d, isLeap);
+    const hint = document.getElementById(prefix + '_lunarSolar');
+    if (s && hint) hint.textContent = '对应公历：' + s.y + '年' + s.m + '月' + s.d + '日';
+  };
+
+  ySel.innerHTML = '';
+  for (let y = endY; y >= startY; y--) { const o = document.createElement('option'); o.value = y; o.textContent = y + '年'; ySel.appendChild(o); }
+  if (sel && sel.y) ySel.value = sel.y;
+  fillMonths(sel ? sel.m : 1, sel ? sel.isLeap : false);
+  fillDays(sel ? sel.d : 1);
+  updateSolar();
+
+  ySel.addEventListener('change', () => { const mOpt = mSel.selectedOptions[0]; fillMonths(+mOpt.value, mOpt.dataset.leap === '1'); fillDays(+dSel.value); updateSolar(); });
+  mSel.addEventListener('change', () => { fillDays(+dSel.value); updateSolar(); });
+  dSel.addEventListener('change', updateSolar);
+};
+
 App.addAnniversary = function() {
   const records = Store.get('anniversaries', []);
   const name = document.getElementById('a_name').value.trim();
-  const date = document.getElementById('a_date').value;
   if (!name) { toast('请输入名称'); return; }
-  if (!date) { toast('请选择日期'); return; }
-  records.push({
-    id: U.uid(),
-    name,
-    type: document.getElementById('a_type').value,
-    date,
-    isLunar: document.getElementById('a_lunar').value === 'true',
-    created: Date.now()
-  });
+  const isLunar = document.getElementById('a_lunar').value === 'true';
+  let date, lunar = null;
+  if (isLunar) {
+    const ySel = document.getElementById('a_lyear');
+    const mOpt = document.getElementById('a_lmonth').selectedOptions[0];
+    const dSel = document.getElementById('a_lday');
+    const m = +mOpt.value, isLeap = mOpt.dataset.leap === '1', d = +dSel.value;
+    const s = Lunar.toSolar(+ySel.value, m, d, isLeap);
+    if (!s) { toast('请选择有效的农历日期'); return; }
+    date = s.y + '-' + String(s.m).padStart(2, '0') + '-' + String(s.d).padStart(2, '0');
+    lunar = { y: +ySel.value, m, d, isLeap };
+  } else {
+    date = document.getElementById('a_date').value;
+    if (!date) { toast('请选择日期'); return; }
+  }
+  records.push({ id: U.uid(), name, type: document.getElementById('a_type').value, date, isLunar, lunar, created: Date.now() });
   Store.set('anniversaries', records);
   App.modules.anniversaries(document.getElementById('contentArea'));
   toast('纪念日已添加');
+};
+
+App.editAnniversary = function(id) {
+  this._editingAnnivId = id;
+  this.modules.anniversaries(document.getElementById('contentArea'));
+};
+
+App.cancelAnnivEdit = function() {
+  this._editingAnnivId = null;
+  this.modules.anniversaries(document.getElementById('contentArea'));
+};
+
+App.saveAnniversary = function(id) {
+  const records = Store.get('anniversaries', []);
+  const rec = records.find(r => r.id === id);
+  if (!rec) return;
+  const p = 'ae_' + id;
+  const name = document.getElementById(p + '_name').value.trim();
+  if (!name) { toast('请输入名称'); return; }
+  const isLunar = document.getElementById(p + '_lunar').value === 'true';
+  let date, lunar = null;
+  if (isLunar) {
+    const ySel = document.getElementById(p + '_lyear');
+    const mOpt = document.getElementById(p + '_lmonth').selectedOptions[0];
+    const dSel = document.getElementById(p + '_lday');
+    const m = +mOpt.value, isLeap = mOpt.dataset.leap === '1', d = +dSel.value;
+    const s = Lunar.toSolar(+ySel.value, m, d, isLeap);
+    if (!s) { toast('请选择有效的农历日期'); return; }
+    date = s.y + '-' + String(s.m).padStart(2, '0') + '-' + String(s.d).padStart(2, '0');
+    lunar = { y: +ySel.value, m, d, isLeap };
+  } else {
+    date = document.getElementById(p + '_date').value;
+    if (!date) { toast('请选择日期'); return; }
+  }
+  rec.name = name;
+  rec.type = document.getElementById(p + '_type').value;
+  rec.date = date;
+  rec.isLunar = isLunar;
+  rec.lunar = lunar;
+  Store.set('anniversaries', records);
+  this._editingAnnivId = null;
+  App.modules.anniversaries(document.getElementById('contentArea'));
+  toast('已保存修改');
 };
 
 App.delAnniversary = function(id) {
@@ -1782,6 +2070,22 @@ App.modules.periods = function(el) {
       <div class="card-title"><span class="icon-dot"></span>历史记录</div>
       ${records.length > 0 ? records.slice().reverse().map(r => {
         const dur = r.endDate ? U.daysBetween(r.startDate, r.endDate) + 1 : 1;
+        const PENCIL = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>';
+        if (App._editingPeriodId === r.id) {
+          const p = 'pe_' + r.id;
+          return `<div class="mini-item mini-editing">
+            <div class="todo-edit-form" style="width:100%">
+              <div class="todo-edit-row">
+                <input type="date" id="${p}_start" value="${r.startDate}">
+                <input type="date" id="${p}_end" value="${r.endDate || ''}">
+              </div>
+              <div class="todo-edit-actions">
+                <button class="btn btn-primary" onclick="App.savePeriod('${r.id}')">保存</button>
+                <button class="btn btn-ghost" onclick="App.cancelPeriodEdit()">取消</button>
+              </div>
+            </div>
+          </div>`;
+        }
         return `<div class="mini-item">
           <div class="dot" style="background:var(--accent)"></div>
           <div style="flex:1">
@@ -1789,6 +2093,7 @@ App.modules.periods = function(el) {
             ${r.endDate ? ` ~ ${U.fmtDateFull(r.endDate)}` : ''}
             <span class="badge badge-accent ml-8">${dur}天</span>
           </div>
+          <button class="todo-edit" onclick="App.editPeriod('${r.id}')">${PENCIL}</button>
           <button class="todo-delete" onclick="App.delPeriod('${r.id}')">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/></svg>
           </button>
@@ -1856,6 +2161,362 @@ App.delPeriod = function(id) {
   Store.set('periods', records);
   App.modules.periods(document.getElementById('contentArea'));
   toast('已删除');
+};
+
+App.editPeriod = function(id) {
+  this._editingPeriodId = id;
+  this.modules.periods(document.getElementById('contentArea'));
+};
+
+App.cancelPeriodEdit = function() {
+  this._editingPeriodId = null;
+  this.modules.periods(document.getElementById('contentArea'));
+};
+
+App.savePeriod = function(id) {
+  const records = Store.get('periods', []);
+  const rec = records.find(r => r.id === id);
+  if (!rec) return;
+  const p = 'pe_' + id;
+  const startDate = document.getElementById(p + '_start').value;
+  const endDate = document.getElementById(p + '_end').value;
+  if (!startDate) { toast('请选择开始日期'); return; }
+  if (endDate && endDate < startDate) { toast('结束日期不能早于开始日期'); return; }
+  rec.startDate = startDate;
+  rec.endDate = endDate || null;
+  Store.set('periods', records);
+  this._editingPeriodId = null;
+  App.modules.periods(document.getElementById('contentArea'));
+  toast('已保存修改');
+};
+
+
+/* ============================================================
+   MODULE: Customers (客户进展)
+   ============================================================ */
+App.modules.customers = function(el) {
+  const PENCIL = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
+  const TRASH = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/></svg>';
+  App._showHandled = (App._showHandled === undefined) ? false : App._showHandled;
+  const edit = App._editCust || null;
+
+  const newList = Store.get('custNew', []);
+  const quoteList = Store.get('custQuote', []);
+  const keyList = Store.get('custKey', []);
+
+  const statusText = s => (s === 'replied' ? '已回复' : s === 'called_no_reply' ? '打电话未回复' : '未回复');
+  const statusBadge = s => (s === 'replied' ? 'badge-success' : s === 'called_no_reply' ? 'badge-accent' : 'badge-warning');
+  const isHidden = c => (c.status === 'replied' || c.status === 'called_no_reply');
+
+  const newRow = (c) => {
+    if (edit && edit.kind === 'new' && edit.id === c.id) {
+      return `
+      <div class="cust-row cust-editing">
+        <div class="todo-edit-form">
+          <input class="todo-edit-input" id="cn_title" value="${U.escape(c.title)}" placeholder="标题">
+          <div class="todo-edit-row">
+            <input type="tel" id="cn_phone" value="${U.escape(c.phone || '')}" placeholder="电话">
+            <input type="email" id="cn_email" value="${U.escape(c.email || '')}" placeholder="邮箱">
+          </div>
+          <div class="todo-edit-row">
+            <input type="date" id="cn_first" value="${c.firstDate || U.today()}">
+            <select id="cn_status">
+              <option value="unreplied"${c.status !== 'replied' && c.status !== 'called_no_reply' ? ' selected' : ''}>未回复</option>
+              <option value="replied"${c.status === 'replied' ? ' selected' : ''}>已回复</option>
+              <option value="called_no_reply"${c.status === 'called_no_reply' ? ' selected' : ''}>打电话未回复</option>
+            </select>
+          </div>
+          <div class="todo-edit-actions">
+            <button class="btn btn-primary btn-sm" onclick="App.saveCustNew('${c.id}')">保存</button>
+            <button class="btn btn-soft btn-sm" onclick="App.cancelCustEdit()">取消</button>
+          </div>
+        </div>
+      </div>`;
+    }
+    return `
+    <div class="cust-row">
+      <div class="cust-main">
+        <div class="cust-title">${U.escape(c.title)}</div>
+        <div class="cust-meta">
+          ${c.phone ? `<span class="text-sm text-light">电话 ${U.escape(c.phone)}</span>` : ''}
+          ${c.email ? `<span class="text-sm text-light">邮箱 ${U.escape(c.email)}</span>` : ''}
+          ${c.firstDate ? `<span class="text-sm text-light">首次联系 ${U.fmtDate(c.firstDate)}</span>` : ''}
+        </div>
+      </div>
+      <span class="badge ${statusBadge(c.status)}">${statusText(c.status)}</span>
+      <div class="cust-actions">
+        <button class="todo-edit" title="编辑" onclick="App.editCust('new','${c.id}')">${PENCIL}</button>
+        <button class="todo-delete" title="删除" onclick="App.delCust('new','${c.id}')">${TRASH}</button>
+      </div>
+    </div>`;
+  };
+
+  const quoteRow = (c) => {
+    const nf = c.nextFollow;
+    const days = nf ? U.daysUntil(nf) : null;
+    const nfText = nf ? U.fmtDate(nf) + (days === 0 ? '（今天）' : days > 0 ? `（剩 ${days} 天）` : `（已逾期 ${-days} 天）`) : '—';
+    if (edit && edit.kind === 'quote' && edit.id === c.id) {
+      return `
+      <div class="cust-row cust-editing">
+        <div class="todo-edit-form">
+          <input class="todo-edit-input" id="cq_title" value="${U.escape(c.title)}" placeholder="报价项目">
+          <div class="todo-edit-row">
+            <input type="tel" id="cq_phone" value="${U.escape(c.phone || '')}" placeholder="电话">
+            <input type="email" id="cq_email" value="${U.escape(c.email || '')}" placeholder="邮箱">
+          </div>
+          <div class="todo-edit-row">
+            <input type="date" id="cq_quote" value="${c.quoteDate || U.today()}">
+            <select id="cq_follow">
+              <option value="3"${c.followDays == 3 ? ' selected' : ''}>3 天</option>
+              <option value="7"${c.followDays == 7 ? ' selected' : ''}>7 天</option>
+              <option value="15"${c.followDays == 15 ? ' selected' : ''}>15 天</option>
+              <option value="30"${c.followDays == 30 ? ' selected' : ''}>30 天</option>
+            </select>
+          </div>
+          <div class="todo-edit-row">
+            <input type="date" id="cq_last" value="${c.lastFollowDate || ''}">
+            <input type="text" id="cq_fb" value="${U.escape(c.lastFeedback || '')}" placeholder="最新跟进反馈">
+          </div>
+          <div class="todo-edit-actions">
+            <button class="btn btn-primary btn-sm" onclick="App.saveCustQuote('${c.id}')">保存</button>
+            <button class="btn btn-soft btn-sm" onclick="App.cancelCustEdit()">取消</button>
+          </div>
+        </div>
+      </div>`;
+    }
+    return `
+    <div class="cust-row">
+      <div class="cust-main">
+        <div class="cust-title">${U.escape(c.title)}</div>
+        <div class="cust-meta">
+          ${c.phone ? `<span class="text-sm text-light">电话 ${U.escape(c.phone)}</span>` : ''}
+          ${c.email ? `<span class="text-sm text-light">邮箱 ${U.escape(c.email)}</span>` : ''}
+          <span class="text-sm text-light">报价 ${c.quoteDate ? U.fmtDate(c.quoteDate) : '—'}</span>
+          <span class="text-sm text-light">下次跟进 ${nfText}</span>
+          ${c.lastFollowDate ? `<span class="text-sm text-light">最新跟进 ${U.fmtDate(c.lastFollowDate)}</span>` : ''}
+          ${c.lastFeedback ? `<span class="text-sm text-light">反馈 ${U.escape(c.lastFeedback)}</span>` : ''}
+        </div>
+      </div>
+      <div class="cust-actions">
+        <button class="todo-edit" title="编辑" onclick="App.editCust('quote','${c.id}')">${PENCIL}</button>
+        <button class="todo-delete" title="删除" onclick="App.delCust('quote','${c.id}')">${TRASH}</button>
+      </div>
+    </div>`;
+  };
+
+  const keyRow = (c) => {
+    if (edit && edit.kind === 'key' && edit.id === c.id) {
+      return `
+      <div class="cust-row cust-editing">
+        <div class="todo-edit-form">
+          <input class="todo-edit-input" id="ck_title" value="${U.escape(c.title)}" placeholder="标题">
+          <div class="todo-edit-row">
+            <input type="tel" id="ck_phone" value="${U.escape(c.phone || '')}" placeholder="电话">
+            <input type="email" id="ck_email" value="${U.escape(c.email || '')}" placeholder="邮箱">
+          </div>
+          <div class="todo-edit-actions">
+            <button class="btn btn-primary btn-sm" onclick="App.saveCustKey('${c.id}')">保存</button>
+            <button class="btn btn-soft btn-sm" onclick="App.cancelCustEdit()">取消</button>
+          </div>
+        </div>
+      </div>`;
+    }
+    return `
+    <div class="cust-row">
+      <div class="cust-main">
+        <div class="cust-title">${U.escape(c.title)}</div>
+        <div class="cust-meta">
+          ${c.phone ? `<span class="text-sm text-light">电话 ${U.escape(c.phone)}</span>` : ''}
+          ${c.email ? `<span class="text-sm text-light">邮箱 ${U.escape(c.email)}</span>` : ''}
+        </div>
+      </div>
+      <div class="cust-actions">
+        <button class="todo-edit" title="编辑" onclick="App.editCust('key','${c.id}')">${PENCIL}</button>
+        <button class="todo-delete" title="删除" onclick="App.delCust('key','${c.id}')">${TRASH}</button>
+      </div>
+    </div>`;
+  };
+
+  const visibleNew = newList.filter(c => !isHidden(c));
+  const hiddenNew = newList.filter(isHidden);
+
+  el.innerHTML = `
+    <div class="card">
+      <div class="card-title"><span class="icon-dot"></span>新建联客户</div>
+      <div class="form-row">
+        <div class="form-group" style="flex:2"><label>标题</label><input type="text" id="n_title" placeholder="客户/公司名称"></div>
+        <div class="form-group" style="flex:1"><label>电话</label><input type="tel" id="n_phone" placeholder="电话"></div>
+        <div class="form-group" style="flex:1"><label>邮箱</label><input type="email" id="n_email" placeholder="邮箱"></div>
+        <div class="form-group" style="flex:1"><label>首次联系日期</label><input type="date" id="n_first" value="${U.today()}"></div>
+        <div class="form-group" style="flex:1"><label>状态</label><select id="n_status">
+          <option value="unreplied">未回复</option>
+          <option value="replied">已回复</option>
+          <option value="called_no_reply">打电话未回复</option>
+        </select></div>
+        <div style="display:flex;align-items:flex-end"><button class="btn btn-primary" onclick="App.addCustNew()">添加</button></div>
+      </div>
+      <div class="mt-12">
+        ${visibleNew.length || hiddenNew.length ? visibleNew.map(newRow).join('') + (App._showHandled ? hiddenNew.map(c => `<div class="cust-done">${newRow(c)}</div>`).join('') : '') : '<div class="empty-state"><p>暂无新建联客户</p></div>'}
+        ${hiddenNew.length ? `<div class="mt-12"><button class="btn btn-soft btn-sm" onclick="App.toggleShowHandled()">${App._showHandled ? '隐藏已处理' : '显示已处理 (' + hiddenNew.length + ')'}</button></div>` : ''}
+      </div>
+    </div>
+
+    <div class="card mt-16">
+      <div class="card-title"><span class="icon-dot"></span>近期报价客户</div>
+      <div class="form-row">
+        <div class="form-group" style="flex:2"><label>报价项目</label><input type="text" id="q_title" placeholder="报价项目"></div>
+        <div class="form-group" style="flex:1"><label>电话</label><input type="tel" id="q_phone" placeholder="电话"></div>
+        <div class="form-group" style="flex:1"><label>邮箱</label><input type="email" id="q_email" placeholder="邮箱"></div>
+        <div class="form-group" style="flex:1"><label>报价日期</label><input type="date" id="q_quote" value="${U.today()}"></div>
+        <div class="form-group" style="flex:1"><label>下次跟进（天）</label><select id="q_follow">
+          <option value="3">3 天</option>
+          <option value="7" selected>7 天</option>
+          <option value="15">15 天</option>
+          <option value="30">30 天</option>
+        </select></div>
+        <div style="display:flex;align-items:flex-end"><button class="btn btn-primary" onclick="App.addCustQuote()">添加</button></div>
+      </div>
+      <div class="mt-12">
+        ${quoteList.length ? quoteList.map(quoteRow).join('') : '<div class="empty-state"><p>暂无报价客户</p></div>'}
+      </div>
+    </div>
+
+    <div class="card mt-16">
+      <div class="card-title"><span class="icon-dot"></span>重点客户</div>
+      <div class="form-row">
+        <div class="form-group" style="flex:2"><label>标题</label><input type="text" id="k_title" placeholder="客户/公司名称"></div>
+        <div class="form-group" style="flex:1"><label>电话</label><input type="tel" id="k_phone" placeholder="电话"></div>
+        <div class="form-group" style="flex:1"><label>邮箱</label><input type="email" id="k_email" placeholder="邮箱"></div>
+        <div style="display:flex;align-items:flex-end"><button class="btn btn-primary" onclick="App.addCustKey()">添加</button></div>
+      </div>
+      <div class="mt-12">
+        ${keyList.length ? keyList.map(keyRow).join('') : '<div class="empty-state"><p>暂无重点客户</p></div>'}
+      </div>
+    </div>
+  `;
+};
+
+App.editCust = function(kind, id) {
+  App._editCust = { kind, id };
+  App.modules.customers(document.getElementById('contentArea'));
+};
+App.cancelCustEdit = function() {
+  App._editCust = null;
+  App.modules.customers(document.getElementById('contentArea'));
+};
+App.toggleShowHandled = function() {
+  App._showHandled = !App._showHandled;
+  App.modules.customers(document.getElementById('contentArea'));
+};
+App.delCust = function(kind, id) {
+  const map = { new: 'custNew', quote: 'custQuote', key: 'custKey' };
+  let list = Store.get(map[kind], []);
+  list = list.filter(c => c.id !== id);
+  Store.set(map[kind], list);
+  App.modules.customers(document.getElementById('contentArea'));
+  toast('已删除');
+};
+App.addCustNew = function() {
+  const title = document.getElementById('n_title').value.trim();
+  if (!title) { toast('请输入标题'); return; }
+  const list = Store.get('custNew', []);
+  list.push({
+    id: U.uid(), title,
+    phone: document.getElementById('n_phone').value.trim(),
+    email: document.getElementById('n_email').value.trim(),
+    firstDate: document.getElementById('n_first').value,
+    status: document.getElementById('n_status').value,
+    created: Date.now()
+  });
+  Store.set('custNew', list);
+  App.modules.customers(document.getElementById('contentArea'));
+  toast('已添加');
+};
+App.saveCustNew = function(id) {
+  const list = Store.get('custNew', []);
+  const c = list.find(x => x.id === id);
+  if (!c) return;
+  const title = document.getElementById('cn_title').value.trim();
+  if (!title) { toast('请输入标题'); return; }
+  c.title = title;
+  c.phone = document.getElementById('cn_phone').value.trim();
+  c.email = document.getElementById('cn_email').value.trim();
+  c.firstDate = document.getElementById('cn_first').value;
+  c.status = document.getElementById('cn_status').value;
+  Store.set('custNew', list);
+  App._editCust = null;
+  App.modules.customers(document.getElementById('contentArea'));
+  toast('已保存修改');
+};
+App.addCustQuote = function() {
+  const title = document.getElementById('q_title').value.trim();
+  if (!title) { toast('请输入报价项目'); return; }
+  const quoteDate = document.getElementById('q_quote').value || U.today();
+  const followDays = +document.getElementById('q_follow').value;
+  const list = Store.get('custQuote', []);
+  list.push({
+    id: U.uid(), title,
+    phone: document.getElementById('q_phone').value.trim(),
+    email: document.getElementById('q_email').value.trim(),
+    quoteDate, followDays,
+    nextFollow: U.addDays(quoteDate, followDays),
+    lastFollowDate: '', lastFeedback: '',
+    created: Date.now()
+  });
+  Store.set('custQuote', list);
+  App.syncQuoteTodos();
+  App.modules.customers(document.getElementById('contentArea'));
+  toast('已添加');
+};
+App.saveCustQuote = function(id) {
+  const list = Store.get('custQuote', []);
+  const c = list.find(x => x.id === id);
+  if (!c) return;
+  const title = document.getElementById('cq_title').value.trim();
+  if (!title) { toast('请输入报价项目'); return; }
+  const quoteDate = document.getElementById('cq_quote').value || U.today();
+  const followDays = +document.getElementById('cq_follow').value;
+  c.title = title;
+  c.phone = document.getElementById('cq_phone').value.trim();
+  c.email = document.getElementById('cq_email').value.trim();
+  c.quoteDate = quoteDate;
+  c.followDays = followDays;
+  c.nextFollow = U.addDays(quoteDate, followDays);
+  c.lastFollowDate = document.getElementById('cq_last').value;
+  c.lastFeedback = document.getElementById('cq_fb').value.trim();
+  Store.set('custQuote', list);
+  App.syncQuoteTodos();
+  App._editCust = null;
+  App.modules.customers(document.getElementById('contentArea'));
+  toast('已保存修改');
+};
+App.addCustKey = function() {
+  const title = document.getElementById('k_title').value.trim();
+  if (!title) { toast('请输入标题'); return; }
+  const list = Store.get('custKey', []);
+  list.push({
+    id: U.uid(), title,
+    phone: document.getElementById('k_phone').value.trim(),
+    email: document.getElementById('k_email').value.trim(),
+    created: Date.now()
+  });
+  Store.set('custKey', list);
+  App.modules.customers(document.getElementById('contentArea'));
+  toast('已添加');
+};
+App.saveCustKey = function(id) {
+  const list = Store.get('custKey', []);
+  const c = list.find(x => x.id === id);
+  if (!c) return;
+  const title = document.getElementById('ck_title').value.trim();
+  if (!title) { toast('请输入标题'); return; }
+  c.title = title;
+  c.phone = document.getElementById('ck_phone').value.trim();
+  c.email = document.getElementById('ck_email').value.trim();
+  Store.set('custKey', list);
+  App._editCust = null;
+  App.modules.customers(document.getElementById('contentArea'));
+  toast('已保存修改');
 };
 
 /* ===== Init ===== */
