@@ -339,7 +339,7 @@ App._syncPush = function(data) {
 };
 
 App._syncPull = async function() {
-  if (!SYNC.ENABLED || SYNC.PULLING) return;
+  if (!SYNC.ENABLED || SYNC.PULLING) return false;
   SYNC.PULLING = true;
   try {
     const res = await fetch(SYNC.ENDPOINT, {
@@ -347,10 +347,10 @@ App._syncPull = async function() {
       headers: { 'Accept': 'application/json' },
       cache: 'no-store'
     });
-    if (!res.ok) return;
+    if (!res.ok) return false;
     const payload = await res.json();
     const remote = payload && payload.data ? payload.data : null;
-    if (!remote) return;
+    if (!remote) return false;
     const local = Store.load();
     const remoteTs = remote._syncUpdatedAt || 0;
     const localTs = local._syncUpdatedAt || 0;
@@ -359,19 +359,24 @@ App._syncPull = async function() {
       Store.replaceAll(remote);
       if (this.current) this.switch(this.current);
       toast('已同步最新数据');
+      return true;
     }
+    return false;
   } catch (_) {
     // 离线或接口不可用（如本地开发环境无 /api/sync）：静默忽略
+    return false;
   } finally {
     SYNC.PULLING = false;
   }
 };
 
 App._syncNow = async function() {
-  // 手动按钮：先上传本地，再拉取云端，完成双向对齐
-  const local = Store.load();
-  this._syncPush(local);
-  await this._syncPull();
+  // 手动按钮：先拉云端（云端较新则套用，绝不回传旧数据），仅当本地较新才上传离线编辑
+  const applied = await this._syncPull();
+  if (!applied) {
+    this._syncPush(Store.load());
+    toast('已上传本地更改');
+  }
 };
 
 /* ============================================================
