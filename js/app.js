@@ -312,7 +312,6 @@ const App = {
         await App._syncNow();
         btn.disabled = false;
         btn.classList.remove('syncing');
-        toast('同步完成');
       });
     }
     // 标签页切回 / 窗口重新获得焦点时拉取一次
@@ -488,6 +487,32 @@ App._syncPush = function(data) {
   if (!_pushTimer && !_pushing) _flushPush();
 };
 
+// 显式同步时使用的「可靠上传」：在按钮点击的同步上下文里 await 完成（有限重试），
+// 保证本次的删除/新增一定落到云端，而不依赖后台退避定时器——
+// 移动端切后台会停掉定时器，导致 fire-and-forget 的自动上传被丢弃，
+// 这正是此前「删除后对方收不到、只有硬刷才会同步」的根因。
+async function _pushAwait(data, attempts = 5) {
+  if (!SYNC.ENABLED) return false;
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    _pushBuf = data; return false; // 离线：交回后台缓冲，联网后再补发
+  }
+  for (let i = 0; i < attempts; i++) {
+    try {
+      await fetch(SYNC.ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ data })
+      });
+      _pushBuf = null; _pushTimer = null; _pushAttempts = 0;
+      return true;
+    } catch (_) {
+      if (i < attempts - 1) await new Promise(r => setTimeout(r, 400 * (i + 1)));
+    }
+  }
+  _pushBuf = data; _flushPush(); // 仍失败：后台缓冲 + 退避重试兜底
+  return false;
+}
+
 App._syncPull = async function() {
   if (!SYNC.ENABLED || SYNC.PULLING) return false;
   SYNC.PULLING = true;
@@ -533,10 +558,13 @@ App._syncPull = async function() {
 };
 
 App._syncNow = async function() {
-  // 手动按钮：拉取并按模块合并（云端较新套用、本地较新上传），绝不用旧数据覆盖云端
-  await this._syncPull();
-  this._syncPush(Store.load()); // 确保云端拿到合并后的完整最新数据
-  toast('同步完成');
+  // 同步按钮 = 提交键：先把本地的（新增 / 删除墓碑）可靠地上传到云端，
+  // 再拉取云端并集（已含对方数据）套用到本地，最后把合并后的完整最新态写回云端，
+  // 三步全部 await，确保「点击即同步、删除/新增双向生效」，不再依赖后台定时器。
+  await _pushAwait(Store.load());   // 1) 上传我方变更（删除/新增）
+  await this._syncPull();           // 2) 拉取并集并套用对方数据（合并 + 必要时回写）
+  await _pushAwait(Store.load());   // 3) 把合并后的最新态可靠写回云端，确保对方也能拿到
+  if (typeof toast === 'function') toast('同步完成');
 };
 
 /* ============================================================

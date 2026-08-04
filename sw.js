@@ -1,4 +1,4 @@
-const CACHE_NAME = 'rhea-dashboard-v24';
+const CACHE_NAME = 'rhea-dashboard-v25';
 const ASSETS = [
   './',
   './index.html',
