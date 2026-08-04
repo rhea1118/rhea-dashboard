@@ -154,6 +154,7 @@ function mergeSyncData(local, remote) {
   for (const k in local) if (!k.startsWith('_')) keys.add(k);
   for (const k in remote) if (!k.startsWith('_')) keys.add(k);
   for (const k of keys) {
+    if (k.startsWith('deleted_')) continue; // 墓碑数组本身不参与「模块级」合并，避免被另一端空墓碑覆盖而丢失删除记录
     const lHas = Object.prototype.hasOwnProperty.call(local, k);
     const rHas = Object.prototype.hasOwnProperty.call(remote, k);
     const tsL = modTs(local, k);
@@ -317,6 +318,8 @@ const App = {
     });
     window.addEventListener('focus', () => App._syncPull());
     window.addEventListener('pageshow', (e) => { if (e.persisted) App._syncPull(); });
+    // 恢复联网时，把因离线/失败而缓冲的上传（含删除墓碑）补发出去
+    window.addEventListener('online', () => { _pushAttempts = 0; _pushTimer = null; _flushPush(); });
   },
   
   bindNav() {
@@ -445,15 +448,41 @@ const App = {
 };
 
 // ===== 跨设备同步方法（定义于 App 之后，避免 TDZ）=====
+// 上传队列：始终只保留「最新一份完整数据」，发送失败自动退避重试，
+// 联网后补发。这能从根上解决「删除/编辑的推送因网络抖动丢失，
+// 导致被删项在另一端复活 / 改动丢失」的问题——之前是 fire-and-forget，
+// 手机端一次失败就把删除墓碑弄丢了。
+let _pushBuf = null;     // 最近一次待上传的完整数据（覆盖式缓冲）
+let _pushTimer = null;   // 退避重试定时器
+let _pushAttempts = 0;   // 当前连续失败次数
+let _pushing = false;    // 是否正在发送
+
+function _flushPush() {
+  if (_pushBuf == null || _pushing || !SYNC.ENABLED) return;
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return; // 离线：等 online 事件再发
+  _pushing = true;
+  const data = _pushBuf;
+  fetch(SYNC.ENDPOINT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ data })
+  })
+    .then(() => { _pushBuf = null; _pushTimer = null; _pushAttempts = 0; _pushing = false; })
+    .catch(() => {
+      _pushing = false;
+      _pushAttempts++;
+      if (_pushAttempts <= 12) {
+        const delay = Math.min(800 * Math.pow(2, _pushAttempts), 30000);
+        _pushTimer = setTimeout(_flushPush, delay);
+      }
+    });
+}
+
 App._syncPush = function(data) {
   if (!SYNC.ENABLED) return;
-  try {
-    fetch(SYNC.ENDPOINT, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ data })
-    }).catch(() => {});
-  } catch (_) {}
+  _pushBuf = data; // 始终持有最新数据（覆盖式），重试时发的是最新态而非过期态
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return; // 离线：仅缓冲，等 online 补发
+  if (!_pushTimer && !_pushing) _flushPush();
 };
 
 App._syncPull = async function() {

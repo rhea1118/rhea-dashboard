@@ -62,6 +62,7 @@ function mergeData(local, remote) {
   for (const k in local) if (!k.startsWith('_')) keys.add(k);
   for (const k in remote) if (!k.startsWith('_')) keys.add(k);
   for (const k of keys) {
+    if (k.startsWith('deleted_')) continue; // 墓碑数组本身不参与「模块级」合并，避免被另一端空墓碑覆盖而丢失删除记录
     const lHas = Object.prototype.hasOwnProperty.call(local, k);
     const rHas = Object.prototype.hasOwnProperty.call(remote, k);
     const tsL = modTs(local, k);
