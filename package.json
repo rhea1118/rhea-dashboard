@@ -4,6 +4,6 @@
   "private": true,
   "description": "Serverless functions for Rhea dashboard (Netlify Blobs sync)",
   "dependencies": {
-    "@netlify/blobs": "^2.0.0"
+    "@netlify/blobs": "10.7.11"
   }
 }
