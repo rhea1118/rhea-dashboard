@@ -219,11 +219,12 @@ const App = {
     this.registerSW();
     this.switch('dashboard');
     this.syncQuoteTodos();
+    this.syncNewTodos();
     this.bindSync();
     Store.normalizeTimestamps(); // 升级迁移：旧数据拆出各模块时间戳，先于拉取执行
     this._syncPull(); // 打开页面时先拉一次云端，获取其他设备的最新数据
     // Update time every minute
-    setInterval(() => { this.updateTopbar(); this.syncQuoteTodos(); if (this.current === 'todos') this.renderTodoList(); }, 60000);
+    setInterval(() => { this.updateTopbar(); this.syncQuoteTodos(); this.syncNewTodos(); if (this.current === 'todos') this.renderTodoList(); }, 60000);
   },
 
   // 同步按钮 + 切回页面/切标签页时拉取（无定时器）
@@ -569,6 +570,7 @@ App.weekCount = function(arr) {
    ============================================================ */
 App.modules.todos = function(el) {
   App.syncQuoteTodos();
+  App.syncNewTodos();
   const todos = Store.get('todos', []);
   const today = U.today();
   const doneCount = todos.filter(t => t.completed).length;
@@ -691,9 +693,11 @@ App.syncQuoteTodos = function() {
   const todos = Store.get('todos', []);
   const today = U.today();
   let changed = false;
+  const validSources = new Set();
   quotes.forEach(q => {
     if (!q.nextFollow || q.nextFollow > today) return;
     const src = 'quote:' + q.id;
+    validSources.add(src);
     const text = '跟进报价客户：' + q.title + (q.phone ? '（' + q.phone + '）' : '');
     const existing = todos.find(t => t.source === src);
     if (existing) {
@@ -708,7 +712,40 @@ App.syncQuoteTodos = function() {
       changed = true;
     }
   });
-  if (changed) Store.set('todos', todos);
+  const before = todos.length;
+  const filtered = todos.filter(t => !(t.source && t.source.indexOf('quote:') === 0 && !validSources.has(t.source)));
+  if (filtered.length !== before) changed = true;
+  if (changed) Store.set('todos', filtered);
+};
+
+App.syncNewTodos = function() {
+  const news = Store.get('custNew', []);
+  const todos = Store.get('todos', []);
+  const today = U.today();
+  let changed = false;
+  const validSources = new Set();
+  news.forEach(n => {
+    if (!n.nextFollow || n.nextFollow > today) return;
+    const src = 'new:' + n.id;
+    validSources.add(src);
+    const text = '跟进新建联客户：' + n.title + (n.phone ? '（' + n.phone + '）' : '');
+    const existing = todos.find(t => t.source === src);
+    if (existing) {
+      if (existing.date !== n.nextFollow || existing.text !== text) {
+        existing.date = n.nextFollow;
+        existing.text = text;
+        existing.completed = false;
+        changed = true;
+      }
+    } else {
+      todos.push({ id: U.uid(), text, category: 'work', date: n.nextFollow, completed: false, created: Date.now(), source: src });
+      changed = true;
+    }
+  });
+  const before = todos.length;
+  const filtered = todos.filter(t => !(t.source && t.source.indexOf('new:') === 0 && !validSources.has(t.source)));
+  if (filtered.length !== before) changed = true;
+  if (changed) Store.set('todos', filtered);
 };
 
 App.addTodo = function() {
@@ -2357,10 +2394,16 @@ App.modules.customers = function(el) {
           </div>
           <div class="todo-edit-row">
             <input type="date" id="cn_first" value="${c.firstDate || U.today()}">
-            <select id="cn_status">
+            <select id="cn_status" onchange="App.toggleNewFollowEdit()">
               <option value="unreplied"${c.status !== 'replied' && c.status !== 'called_no_reply' ? ' selected' : ''}>未回复</option>
               <option value="replied"${c.status === 'replied' ? ' selected' : ''}>已回复</option>
               <option value="called_no_reply"${c.status === 'called_no_reply' ? ' selected' : ''}>打电话未回复</option>
+            </select>
+            <select id="cn_follow" ${c.status !== 'unreplied' ? 'disabled' : ''}>
+              <option value="3"${c.followDays == 3 ? ' selected' : ''}>3 天</option>
+              <option value="7"${c.followDays == 7 ? ' selected' : ''}>7 天</option>
+              <option value="15"${c.followDays == 15 ? ' selected' : ''}>15 天</option>
+              <option value="30"${c.followDays == 30 ? ' selected' : ''}>30 天</option>
             </select>
           </div>
           <div class="todo-edit-actions">
@@ -2370,6 +2413,9 @@ App.modules.customers = function(el) {
         </div>
       </div>`;
     }
+    const nf = c.nextFollow;
+    const ndays = nf ? U.daysUntil(nf) : null;
+    const nfText = nf ? U.fmtDate(nf) + (ndays === 0 ? '（今天）' : ndays > 0 ? `（剩 ${ndays} 天）` : `（已逾期 ${-ndays} 天）`) : '';
     return `
     <div class="cust-row">
       <div class="cust-main">
@@ -2378,6 +2424,7 @@ App.modules.customers = function(el) {
           ${c.phone ? `<span class="text-sm text-light">电话 ${U.escape(c.phone)}</span>` : ''}
           ${c.email ? `<span class="text-sm text-light">邮箱 ${U.escape(c.email)}</span>` : ''}
           ${c.firstDate ? `<span class="text-sm text-light">首次联系 ${U.fmtDate(c.firstDate)}</span>` : ''}
+          ${nfText ? `<span class="text-sm text-light">下次跟进 ${nfText}</span>` : ''}
         </div>
       </div>
       <span class="badge ${statusBadge(c.status)}">${statusText(c.status)}</span>
@@ -2485,10 +2532,16 @@ App.modules.customers = function(el) {
         <div class="form-group" style="flex:1"><label>电话</label><input type="tel" id="n_phone" placeholder="电话"></div>
         <div class="form-group" style="flex:1"><label>邮箱</label><input type="email" id="n_email" placeholder="邮箱"></div>
         <div class="form-group" style="flex:1"><label>首次联系日期</label><input type="date" id="n_first" value="${U.today()}"></div>
-        <div class="form-group" style="flex:1"><label>状态</label><select id="n_status">
-          <option value="unreplied">未回复</option>
+        <div class="form-group" style="flex:1"><label>状态</label><select id="n_status" onchange="App.toggleNewFollow()">
+          <option value="unreplied" selected>未回复</option>
           <option value="replied">已回复</option>
           <option value="called_no_reply">打电话未回复</option>
+        </select></div>
+        <div class="form-group" style="flex:1"><label>下次跟进（天）</label><select id="n_follow">
+          <option value="3">3 天</option>
+          <option value="7" selected>7 天</option>
+          <option value="15">15 天</option>
+          <option value="30">30 天</option>
         </select></div>
         <div style="display:flex;align-items:flex-end"><button class="btn btn-primary" onclick="App.addCustNew()">添加</button></div>
       </div>
@@ -2545,27 +2598,44 @@ App.toggleShowHandled = function() {
   App._showHandled = !App._showHandled;
   App.modules.customers(document.getElementById('contentArea'));
 };
+App.toggleNewFollow = function() {
+  const st = document.getElementById('n_status');
+  const fl = document.getElementById('n_follow');
+  if (st && fl) fl.disabled = (st.value !== 'unreplied');
+};
+App.toggleNewFollowEdit = function() {
+  const st = document.getElementById('cn_status');
+  const fl = document.getElementById('cn_follow');
+  if (st && fl) fl.disabled = (st.value !== 'unreplied');
+};
 App.delCust = function(kind, id) {
   const map = { new: 'custNew', quote: 'custQuote', key: 'custKey' };
   let list = Store.get(map[kind], []);
   list = list.filter(c => c.id !== id);
   Store.set(map[kind], list);
+  App.syncNewTodos();
+  App.syncQuoteTodos();
   App.modules.customers(document.getElementById('contentArea'));
   toast('已删除');
 };
 App.addCustNew = function() {
   const title = document.getElementById('n_title').value.trim();
   if (!title) { toast('请输入标题'); return; }
+  const status = document.getElementById('n_status').value;
+  const firstDate = document.getElementById('n_first').value;
+  const followSel = document.getElementById('n_follow');
+  const followDays = (status === 'unreplied' && followSel) ? +followSel.value : 0;
   const list = Store.get('custNew', []);
   list.push({
     id: U.uid(), title,
     phone: document.getElementById('n_phone').value.trim(),
     email: document.getElementById('n_email').value.trim(),
-    firstDate: document.getElementById('n_first').value,
-    status: document.getElementById('n_status').value,
+    firstDate, status, followDays,
+    nextFollow: (status === 'unreplied' && followSel) ? U.addDays(firstDate, followDays) : '',
     created: Date.now()
   });
   Store.set('custNew', list);
+  App.syncNewTodos();
   App.modules.customers(document.getElementById('contentArea'));
   toast('已添加');
 };
@@ -2575,12 +2645,19 @@ App.saveCustNew = function(id) {
   if (!c) return;
   const title = document.getElementById('cn_title').value.trim();
   if (!title) { toast('请输入标题'); return; }
+  const status = document.getElementById('cn_status').value;
+  const firstDate = document.getElementById('cn_first').value;
+  const followSel = document.getElementById('cn_follow');
+  const followDays = (status === 'unreplied' && followSel) ? +followSel.value : 0;
   c.title = title;
   c.phone = document.getElementById('cn_phone').value.trim();
   c.email = document.getElementById('cn_email').value.trim();
-  c.firstDate = document.getElementById('cn_first').value;
-  c.status = document.getElementById('cn_status').value;
+  c.firstDate = firstDate;
+  c.status = status;
+  c.followDays = followDays;
+  c.nextFollow = (status === 'unreplied' && followSel) ? U.addDays(firstDate, followDays) : '';
   Store.set('custNew', list);
+  App.syncNewTodos();
   App._editCust = null;
   App.modules.customers(document.getElementById('contentArea'));
   toast('已保存修改');
