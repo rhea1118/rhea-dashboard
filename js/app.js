@@ -45,7 +45,16 @@ const Store = {
     try { return JSON.parse(localStorage.getItem(this.KEY)) || {}; }
     catch { return {}; }
   },
-  save(data) { localStorage.setItem(this.KEY, JSON.stringify(data)); },
+  // 本地保存：打时间戳并上传到云端（实现"编辑即同步"）
+  save(data) {
+    if (data && typeof data === 'object') data._syncUpdatedAt = Date.now();
+    try { localStorage.setItem(this.KEY, JSON.stringify(data)); } catch (_) {}
+    if (typeof App !== 'undefined' && App._syncPush) App._syncPush(data);
+  },
+  // 静默写入本地（用于套用云端数据，不再触发上传，避免回环）
+  replaceAll(data) {
+    try { localStorage.setItem(this.KEY, JSON.stringify(data)); } catch (_) {}
+  },
   get(key, def) {
     const d = this.load();
     return d[key] !== undefined ? d[key] : def;
@@ -56,6 +65,11 @@ const Store = {
     this.save(d);
   }
 };
+
+// ===== 跨设备同步（Netlify Blobs）=====
+// 策略：编辑即上传（事件驱动，无定时器）；切回页面/切标签页时拉一次；手动按钮可双向同步。
+// 注意：SYNC 配置在此声明；App 的三个同步方法定义在下方的 App 对象之后，避免 TDZ 引用未初始化的 App。
+const SYNC = { ENABLED: true, ENDPOINT: '/api/sync', PULLING: false };
 
 // ===== Utils =====
 const U = {
@@ -159,8 +173,31 @@ const App = {
     this.registerSW();
     this.switch('dashboard');
     this.syncQuoteTodos();
+    this.bindSync();
+    this._syncPull(); // 打开页面时先拉一次云端，获取其他设备的最新数据
     // Update time every minute
     setInterval(() => { this.updateTopbar(); this.syncQuoteTodos(); if (this.current === 'todos') this.renderTodoList(); }, 60000);
+  },
+
+  // 同步按钮 + 切回页面/切标签页时拉取（无定时器）
+  bindSync() {
+    const btn = document.getElementById('syncBtn');
+    if (btn) {
+      btn.addEventListener('click', async () => {
+        btn.classList.add('syncing');
+        btn.disabled = true;
+        await App._syncNow();
+        btn.disabled = false;
+        btn.classList.remove('syncing');
+        toast('同步完成');
+      });
+    }
+    // 标签页切回 / 窗口重新获得焦点时拉取一次
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') App._syncPull();
+    });
+    window.addEventListener('focus', () => App._syncPull());
+    window.addEventListener('pageshow', (e) => { if (e.persisted) App._syncPull(); });
   },
   
   bindNav() {
@@ -286,6 +323,55 @@ const App = {
   },
   
   modules: {}
+};
+
+// ===== 跨设备同步方法（定义于 App 之后，避免 TDZ）=====
+App._syncPush = function(data) {
+  if (!SYNC.ENABLED) return;
+  try {
+    fetch(SYNC.ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ data }),
+      keepalive: true
+    }).catch(() => {});
+  } catch (_) {}
+};
+
+App._syncPull = async function() {
+  if (!SYNC.ENABLED || SYNC.PULLING) return;
+  SYNC.PULLING = true;
+  try {
+    const res = await fetch(SYNC.ENDPOINT, {
+      method: 'GET',
+      headers: { 'Accept': 'application/json' },
+      cache: 'no-store'
+    });
+    if (!res.ok) return;
+    const payload = await res.json();
+    const remote = payload && payload.data ? payload.data : null;
+    if (!remote) return;
+    const local = Store.load();
+    const remoteTs = remote._syncUpdatedAt || 0;
+    const localTs = local._syncUpdatedAt || 0;
+    // 后写覆盖：仅当云端比本地新时才套用，并重渲染当前模块
+    if (remoteTs > localTs) {
+      Store.replaceAll(remote);
+      if (this.current) this.switch(this.current);
+      toast('已同步最新数据');
+    }
+  } catch (_) {
+    // 离线或接口不可用（如本地开发环境无 /api/sync）：静默忽略
+  } finally {
+    SYNC.PULLING = false;
+  }
+};
+
+App._syncNow = async function() {
+  // 手动按钮：先上传本地，再拉取云端，完成双向对齐
+  const local = Store.load();
+  this._syncPush(local);
+  await this._syncPull();
 };
 
 /* ============================================================

@@ -1,0 +1,9 @@
+{
+  "name": "rhea-dashboard-functions",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Serverless functions for Rhea dashboard (Netlify Blobs sync)",
+  "dependencies": {
+    "@netlify/blobs": "^2.0.0"
+  }
+}
