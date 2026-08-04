@@ -45,12 +45,15 @@ const Store = {
     try { return JSON.parse(localStorage.getItem(this.KEY)) || {}; }
     catch { return {}; }
   },
-  // 本地保存：打时间戳并（在首次拉取完成后）上传到云端。
-  // 关键：首次拉取完成前绝不自动上传，否则会把"本地尚未合并云端数据"的不完整数据覆盖到云端。
+  // 本地保存：打时间戳并上传到云端。
+  // 注意：不再用 INITIAL_PULL_DONE 限制上传。服务端已改为「按 id 并集 + 删除墓碑」合并，
+  // 即使本端尚未拉取过云端基线，上传也只会做并集、绝不会覆盖他人数据。
+  // 若仍用 INITIAL_PULL_DONE 限制，则「没完成首次拉取」的设备只能收不能发，
+  // 表现为「一端删除不同步」——这正是此前电脑删手机看不到、手机删电脑能看到的根因。
   save(data) {
     if (data && typeof data === 'object') data._syncUpdatedAt = Date.now();
     try { localStorage.setItem(this.KEY, JSON.stringify(data)); } catch (_) {}
-    if (SYNC.INITIAL_PULL_DONE && typeof App !== 'undefined' && App._syncPush) App._syncPush(data);
+    if (typeof App !== 'undefined' && App._syncPush) App._syncPush(data);
   },
   // 静默写入本地（用于套用云端数据，不再触发上传，避免回环）
   replaceAll(data) {
@@ -91,7 +94,7 @@ const Store = {
     }
     if (changed) {
       this.replaceAll(d);
-      if (SYNC.INITIAL_PULL_DONE && typeof App !== 'undefined' && App._syncPush) App._syncPush(d);
+      if (typeof App !== 'undefined' && App._syncPush) App._syncPush(d);
     }
   }
 };
