@@ -62,9 +62,55 @@ const Store = {
   set(key, val) {
     const d = this.load();
     d[key] = val;
+    d['_ts_' + key] = Date.now();
     this.save(d);
+  },
+  // 一次性迁移：旧数据只有根 _syncUpdatedAt、没有各模块 _ts_。
+  // 升级后把根时间戳拆到各模块，避免未改动模块借根时间戳反向覆盖云端真实数据。
+  normalizeTimestamps() {
+    const d = this.load();
+    if (!d._syncUpdatedAt) return;
+    let changed = false;
+    for (const k in d) {
+      if (k.startsWith('_')) continue;
+      if (!('_ts_' + k in d)) { d['_ts_' + k] = d._syncUpdatedAt; changed = true; }
+    }
+    if (changed) {
+      this.replaceAll(d);
+      if (typeof App !== 'undefined' && App._syncPush) App._syncPush(d);
+    }
   }
 };
+
+// ===== 跨设备同步合并：按模块各自时间戳，逐模块取较新方 =====
+// 避免「整份后写覆盖」导致一台设备上的空/旧模块抹掉另一台的真实数据。
+// 模块 = 不以 _ 开头的顶层键；_ts_<key> 为该模块最后一次编辑时间；
+// 旧数据（无 _ts_）回退到根 _syncUpdatedAt 作为迁移兜底。
+function mergeSyncData(local, remote) {
+  const merged = {};
+  for (const k in local) merged[k] = local[k]; // 先拷本地全部（含元数据）
+  const keys = new Set();
+  for (const k in local) if (!k.startsWith('_')) keys.add(k);
+  for (const k in remote) if (!k.startsWith('_')) keys.add(k);
+  for (const k of keys) {
+    const lHas = Object.prototype.hasOwnProperty.call(local, k);
+    const rHas = Object.prototype.hasOwnProperty.call(remote, k);
+    const tsL = local['_ts_' + k] || 0;
+    const tsR = remote['_ts_' + k] || 0;
+    if (rHas && (!lHas || tsR >= tsL)) {
+      merged[k] = remote[k];
+      merged['_ts_' + k] = tsR;
+    } else if (lHas) {
+      merged[k] = local[k];
+      merged['_ts_' + k] = tsL;
+    }
+  }
+  // 迁移兜底：根时间戳取各模块最大，便于未升级的设备过渡
+  let max = 0;
+  for (const k in merged) if (k.startsWith('_ts_')) max = Math.max(max, merged[k]);
+  merged._syncUpdatedAt = max;
+  return merged;
+}
 
 // ===== 跨设备同步（Netlify Blobs）=====
 // 策略：编辑即上传（事件驱动，无定时器）；切回页面/切标签页时拉一次；手动按钮可双向同步。
@@ -174,6 +220,7 @@ const App = {
     this.switch('dashboard');
     this.syncQuoteTodos();
     this.bindSync();
+    Store.normalizeTimestamps(); // 升级迁移：旧数据拆出各模块时间戳，先于拉取执行
     this._syncPull(); // 打开页面时先拉一次云端，获取其他设备的最新数据
     // Update time every minute
     setInterval(() => { this.updateTopbar(); this.syncQuoteTodos(); if (this.current === 'todos') this.renderTodoList(); }, 60000);
@@ -352,12 +399,13 @@ App._syncPull = async function() {
     const remote = payload && payload.data ? payload.data : null;
     if (!remote) return false;
     const local = Store.load();
-    const remoteTs = remote._syncUpdatedAt || 0;
-    const localTs = local._syncUpdatedAt || 0;
-    // 后写覆盖：仅当云端比本地新时才套用，并重渲染当前模块
-    if (remoteTs > localTs) {
-      Store.replaceAll(remote);
+    // 逐模块合并：谁的新用谁的，空/旧模块不会反向抹掉真实数据
+    const merged = mergeSyncData(local, remote);
+    const changed = JSON.stringify(merged) !== JSON.stringify(local);
+    if (changed) {
+      Store.replaceAll(merged); // 静默写入，避免回环上传
       if (this.current) this.switch(this.current);
+      this._syncPush(merged); // 把合并结果（含本地较新模块）写回云端，让另一端也能拿到
       toast('已同步最新数据');
       return true;
     }
@@ -371,12 +419,10 @@ App._syncPull = async function() {
 };
 
 App._syncNow = async function() {
-  // 手动按钮：先拉云端（云端较新则套用，绝不回传旧数据），仅当本地较新才上传离线编辑
-  const applied = await this._syncPull();
-  if (!applied) {
-    this._syncPush(Store.load());
-    toast('已上传本地更改');
-  }
+  // 手动按钮：拉取并按模块合并（云端较新套用、本地较新上传），绝不用旧数据覆盖云端
+  await this._syncPull();
+  this._syncPush(Store.load()); // 确保云端拿到合并后的完整最新数据
+  toast('同步完成');
 };
 
 /* ============================================================
