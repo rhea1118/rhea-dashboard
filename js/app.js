@@ -66,6 +66,19 @@ const Store = {
     d['_ts_' + key] = Date.now();
     this.save(d);
   },
+  // 删除某个列表模块中的条目，并记录「删除墓碑」（deleted_<key>），
+  // 以便该删除能跨设备同步（另一端合并时据此剔除对应 id）。
+  markDeleted(moduleKey, id) {
+    const d = this.load();
+    const arr = Array.isArray(d[moduleKey]) ? d[moduleKey] : [];
+    d[moduleKey] = arr.filter(x => x.id !== id);
+    const delKey = 'deleted_' + moduleKey;
+    const del = Array.isArray(d[delKey]) ? d[delKey] : [];
+    if (!del.some(x => String(x.id) === String(id))) del.push({ id, ts: Date.now() });
+    d[delKey] = del;
+    d['_ts_' + moduleKey] = Date.now();
+    this.save(d);
+  },
   // 一次性迁移：旧数据只有根 _syncUpdatedAt、没有各模块 _ts_。
   // 升级后把根时间戳拆到各模块，避免未改动模块借根时间戳反向覆盖云端真实数据。
   normalizeTimestamps() {
@@ -98,6 +111,13 @@ function modTs(d, k) {
     (v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === 0);
   return empty ? 0 : (d['_ts_' + k] || 0);
 }
+// 已知「元素带 id 的对象数组」模块：统一按 id 并集 + 删除墓碑合并。
+// 注意：netlify/functions/sync.js 中有一份完全相同的 LIST_MODULES 与合并逻辑，改此处务必同步改服务端。
+const LIST_MODULES = new Set([
+  'custNew', 'custQuote', 'custKey',
+  'todos', 'schedule', 'anniversaries', 'periods', 'health', 'social_data'
+]);
+function isListModule(k) { return LIST_MODULES.has(k); }
 // 是否为「可逐条合并的对象数组」：数组且每个元素都是带 id 的对象
 function isMergeableList(v) {
   return Array.isArray(v) && v.length > 0 &&
@@ -106,17 +126,26 @@ function isMergeableList(v) {
 }
 // 条目级时间戳：编辑时间优先，其次创建时间
 function itemTs(it) { return it.updated || it.created || 0; }
-// 按 id 求并集；同 id 取较新者
-function mergeList(localArr, remoteArr) {
+// 合并两份删除墓碑数组（按 id 去重）
+function unionDeleted(a, b) {
+  const m = new Map();
+  const add = (arr) => { if (!Array.isArray(arr)) return; arr.forEach(d => { if (d && d.id != null) m.set(String(d.id), d); }); };
+  add(a); add(b);
+  return Array.from(m.values());
+}
+// 按 id 求并集；同 id 取较新者；最后剔除出现在任一墓碑中的 id（删除跨端生效）
+function mergeList(localArr, remoteArr, delL, delR) {
   const map = new Map();
-  localArr.forEach(it => map.set(String(it.id), { it, src: 'local' }));
+  localArr.forEach(it => map.set(String(it.id), it));
   remoteArr.forEach(it => {
     const id = String(it.id);
     const cur = map.get(id);
-    if (!cur) { map.set(id, { it, src: 'remote' }); return; }
-    if (itemTs(it) >= itemTs(cur.it)) map.set(id, { it, src: 'remote' });
+    if (!cur) map.set(id, it);
+    else if (itemTs(it) > itemTs(cur)) map.set(id, it);
   });
-  return Array.from(map.values()).map(e => e.it);
+  const del = unionDeleted(delL, delR);
+  const delIds = new Set(del.map(d => String(d.id)));
+  return Array.from(map.values()).filter(it => !delIds.has(String(it.id)));
 }
 function mergeSyncData(local, remote) {
   const merged = {};
@@ -129,10 +158,11 @@ function mergeSyncData(local, remote) {
     const rHas = Object.prototype.hasOwnProperty.call(remote, k);
     const tsL = modTs(local, k);
     const tsR = modTs(remote, k);
-    const bothLists = isMergeableList(local[k]) && isMergeableList(remote[k]);
-    if (bothLists) {
-      // 逐条按 id 合并：两端各自新增的不同条目都保留（并集），同条目取较新
-      merged[k] = mergeList(local[k], remote[k]);
+    const listMerge = isListModule(k) && Array.isArray(local[k]) && Array.isArray(remote[k]);
+    if (listMerge || (isMergeableList(local[k]) && isMergeableList(remote[k]))) {
+      // 列表模块：逐条按 id 并集（两端各自新增都保留），同 id 取较新，再剔除墓碑 id
+      merged[k] = mergeList(local[k], remote[k], local['deleted_' + k], remote['deleted_' + k]);
+      merged['deleted_' + k] = unionDeleted(local['deleted_' + k], remote['deleted_' + k]);
       merged['_ts_' + k] = Math.max(tsL, tsR);
     } else if (rHas && (!lHas || tsR >= tsL)) {
       merged[k] = remote[k];
@@ -142,6 +172,9 @@ function mergeSyncData(local, remote) {
       merged['_ts_' + k] = tsL;
     }
   }
+  // 防御性保留任意一侧存在的墓碑数组
+  for (const k in local) if (k.startsWith('deleted_') && !(k in merged)) merged[k] = local[k];
+  for (const k in remote) if (k.startsWith('deleted_') && !(k in merged)) merged[k] = remote[k];
   // 迁移兜底：根时间戳取各模块最大，便于未升级的设备过渡
   let max = 0;
   for (const k in merged) if (k.startsWith('_ts_')) max = Math.max(max, merged[k]);
@@ -802,7 +835,7 @@ App.addTodo = function() {
   const date = document.getElementById('todoDate').value || U.today();
   if (!text) { toast('请输入待办内容'); return; }
   const todos = Store.get('todos', []);
-  todos.push({ id: U.uid(), text, category: cat, date, completed: false, created: Date.now() });
+  todos.push({ id: U.uid(), text, category: cat, date, completed: false, created: Date.now(), updated: Date.now() });
   Store.set('todos', todos);
   document.getElementById('todoInput').value = '';
   App.renderTodoList();
@@ -816,9 +849,7 @@ App.toggleTodo = function(id) {
 };
 
 App.deleteTodo = function(id) {
-  let todos = Store.get('todos', []);
-  todos = todos.filter(t => t.id !== id);
-  Store.set('todos', todos);
+  Store.markDeleted('todos', id);
   if (App._editingTodoId === id) App._editingTodoId = null;
   App.renderTodoList();
   toast('已删除');
@@ -1371,9 +1402,7 @@ App.renderSocialRecords = function() {
 };
 
 App.delSocialData = function(id) {
-  let records = Store.get('social_data', []);
-  records = records.filter(r => r.id !== id);
-  Store.set('social_data', records);
+  Store.markDeleted('social_data', id);
   App.renderSocialChart();
   App.renderSocialRecords();
   toast('已删除');
@@ -1761,9 +1790,7 @@ App.renderHealthRecords = function() {
 };
 
 App.delHealth = function(id) {
-  let records = Store.get('health', []);
-  records = records.filter(r => r.id !== id);
-  Store.set('health', records);
+  Store.markDeleted('health', id);
   App.modules.health(document.getElementById('contentArea'));
   toast('已删除');
 };
@@ -1896,9 +1923,7 @@ App.saveSchedule = function(id) {
 };
 
 App.delSchedule = function(id) {
-  let records = Store.get('schedule', []);
-  records = records.filter(r => r.id !== id);
-  Store.set('schedule', records);
+  Store.markDeleted('schedule', id);
   App.modules.schedule(document.getElementById('contentArea'));
   toast('已删除');
 };
@@ -2190,9 +2215,7 @@ App.saveAnniversary = function(id) {
 };
 
 App.delAnniversary = function(id) {
-  let records = Store.get('anniversaries', []);
-  records = records.filter(r => r.id !== id);
-  Store.set('anniversaries', records);
+  Store.markDeleted('anniversaries', id);
   App.modules.anniversaries(document.getElementById('contentArea'));
   toast('已删除');
 };
@@ -2378,9 +2401,7 @@ App.addPeriod = function() {
 };
 
 App.delPeriod = function(id) {
-  let records = Store.get('periods', []);
-  records = records.filter(r => r.id !== id);
-  Store.set('periods', records);
+  Store.markDeleted('periods', id);
   App.modules.periods(document.getElementById('contentArea'));
   toast('已删除');
 };
@@ -2658,9 +2679,7 @@ App.toggleNewFollowEdit = function() {
 };
 App.delCust = function(kind, id) {
   const map = { new: 'custNew', quote: 'custQuote', key: 'custKey' };
-  let list = Store.get(map[kind], []);
-  list = list.filter(c => c.id !== id);
-  Store.set(map[kind], list);
+  Store.markDeleted(map[kind], id);
   App.syncNewTodos();
   App.syncQuoteTodos();
   App.modules.customers(document.getElementById('contentArea'));
