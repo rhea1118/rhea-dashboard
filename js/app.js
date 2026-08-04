@@ -45,11 +45,12 @@ const Store = {
     try { return JSON.parse(localStorage.getItem(this.KEY)) || {}; }
     catch { return {}; }
   },
-  // 本地保存：打时间戳并上传到云端（实现"编辑即同步"）
+  // 本地保存：打时间戳并（在首次拉取完成后）上传到云端。
+  // 关键：首次拉取完成前绝不自动上传，否则会把"本地尚未合并云端数据"的不完整数据覆盖到云端。
   save(data) {
     if (data && typeof data === 'object') data._syncUpdatedAt = Date.now();
     try { localStorage.setItem(this.KEY, JSON.stringify(data)); } catch (_) {}
-    if (typeof App !== 'undefined' && App._syncPush) App._syncPush(data);
+    if (SYNC.INITIAL_PULL_DONE && typeof App !== 'undefined' && App._syncPush) App._syncPush(data);
   },
   // 静默写入本地（用于套用云端数据，不再触发上传，避免回环）
   replaceAll(data) {
@@ -77,15 +78,46 @@ const Store = {
     }
     if (changed) {
       this.replaceAll(d);
-      if (typeof App !== 'undefined' && App._syncPush) App._syncPush(d);
+      if (SYNC.INITIAL_PULL_DONE && typeof App !== 'undefined' && App._syncPush) App._syncPush(d);
     }
   }
 };
 
-// ===== 跨设备同步合并：按模块各自时间戳，逐模块取较新方 =====
-// 避免「整份后写覆盖」导致一台设备上的空/旧模块抹掉另一台的真实数据。
-// 模块 = 不以 _ 开头的顶层键；_ts_<key> 为该模块最后一次编辑时间；
-// 旧数据（无 _ts_）回退到根 _syncUpdatedAt 作为迁移兜底。
+// ===== 跨设备同步合并 =====
+// 两层策略：
+// 1) 对「对象数组（元素带 id）」的模块（客户/待办/日程等）：按 id 做【并集】合并，
+//    同一 id 冲突时取条目级时间戳（updated||created）较新的一方。
+//    —— 这能彻底解决「两台设备各自新增不同客户却互相覆盖」的问题。
+// 2) 对其余模块（标量 / 普通对象）：沿用「按模块时间戳取较新方」的整模块策略。
+// 通用防御：模块值为「空」（undefined / 空数组 / 空对象）时时间戳记 0，
+// 绝不反向覆盖云端真实数据——杜绝「某端空数据」把另一端真实数据清空。
+function modTs(d, k) {
+  const v = d[k];
+  const empty = v === undefined ||
+    (Array.isArray(v) && v.length === 0) ||
+    (v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === 0);
+  return empty ? 0 : (d['_ts_' + k] || 0);
+}
+// 是否为「可逐条合并的对象数组」：数组且每个元素都是带 id 的对象
+function isMergeableList(v) {
+  return Array.isArray(v) && v.length > 0 &&
+    v.every(x => x && typeof x === 'object' && !Array.isArray(x) && 'id' in x &&
+      (typeof x.id === 'string' || typeof x.id === 'number'));
+}
+// 条目级时间戳：编辑时间优先，其次创建时间
+function itemTs(it) { return it.updated || it.created || 0; }
+// 按 id 求并集；同 id 取较新者
+function mergeList(localArr, remoteArr) {
+  const map = new Map();
+  localArr.forEach(it => map.set(String(it.id), { it, src: 'local' }));
+  remoteArr.forEach(it => {
+    const id = String(it.id);
+    const cur = map.get(id);
+    if (!cur) { map.set(id, { it, src: 'remote' }); return; }
+    if (itemTs(it) >= itemTs(cur.it)) map.set(id, { it, src: 'remote' });
+  });
+  return Array.from(map.values()).map(e => e.it);
+}
 function mergeSyncData(local, remote) {
   const merged = {};
   for (const k in local) merged[k] = local[k]; // 先拷本地全部（含元数据）
@@ -95,9 +127,14 @@ function mergeSyncData(local, remote) {
   for (const k of keys) {
     const lHas = Object.prototype.hasOwnProperty.call(local, k);
     const rHas = Object.prototype.hasOwnProperty.call(remote, k);
-    const tsL = local['_ts_' + k] || 0;
-    const tsR = remote['_ts_' + k] || 0;
-    if (rHas && (!lHas || tsR >= tsL)) {
+    const tsL = modTs(local, k);
+    const tsR = modTs(remote, k);
+    const bothLists = isMergeableList(local[k]) && isMergeableList(remote[k]);
+    if (bothLists) {
+      // 逐条按 id 合并：两端各自新增的不同条目都保留（并集），同条目取较新
+      merged[k] = mergeList(local[k], remote[k]);
+      merged['_ts_' + k] = Math.max(tsL, tsR);
+    } else if (rHas && (!lHas || tsR >= tsL)) {
       merged[k] = remote[k];
       merged['_ts_' + k] = tsR;
     } else if (lHas) {
@@ -115,7 +152,7 @@ function mergeSyncData(local, remote) {
 // ===== 跨设备同步（Netlify Blobs）=====
 // 策略：编辑即上传（事件驱动，无定时器）；切回页面/切标签页时拉一次；手动按钮可双向同步。
 // 注意：SYNC 配置在此声明；App 的三个同步方法定义在下方的 App 对象之后，避免 TDZ 引用未初始化的 App。
-const SYNC = { ENABLED: true, ENDPOINT: '/api/sync', PULLING: false };
+const SYNC = { ENABLED: true, ENDPOINT: '/api/sync', PULLING: false, INITIAL_PULL_DONE: false };
 
 // ===== Utils =====
 const U = {
@@ -211,18 +248,19 @@ function toast(msg) {
 const App = {
   current: 'dashboard',
   
-  init() {
+  async init() {
     this.restoreNavOrder();
     this.bindNav();
     this.bindSidebar();
     this.updateTopbar();
     this.registerSW();
     this.switch('dashboard');
+    this.bindSync();
+    // 先拉取云端基线（await），确保本地先拿到其他设备数据，再解除上传封锁，避免覆盖
+    await this._syncPull();
+    Store.normalizeTimestamps(); // 升级迁移：旧数据拆出各模块时间戳
     this.syncQuoteTodos();
     this.syncNewTodos();
-    this.bindSync();
-    Store.normalizeTimestamps(); // 升级迁移：旧数据拆出各模块时间戳，先于拉取执行
-    this._syncPull(); // 打开页面时先拉一次云端，获取其他设备的最新数据
     // Update time every minute
     setInterval(() => { this.updateTopbar(); this.syncQuoteTodos(); this.syncNewTodos(); if (this.current === 'todos') this.renderTodoList(); }, 60000);
   },
@@ -380,8 +418,7 @@ App._syncPush = function(data) {
     fetch(SYNC.ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ data }),
-      keepalive: true
+      body: JSON.stringify({ data })
     }).catch(() => {});
   } catch (_) {}
 };
@@ -390,29 +427,40 @@ App._syncPull = async function() {
   if (!SYNC.ENABLED || SYNC.PULLING) return false;
   SYNC.PULLING = true;
   try {
-    const res = await fetch(SYNC.ENDPOINT, {
-      method: 'GET',
-      headers: { 'Accept': 'application/json' },
-      cache: 'no-store'
-    });
-    if (!res.ok) return false;
-    const payload = await res.json();
-    const remote = payload && payload.data ? payload.data : null;
-    if (!remote) return false;
+    let remote = null;
+    // 短暂重试，吸收偶发网络抖动，避免「首次拉取失败→本端永远不上传」
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const res = await fetch(SYNC.ENDPOINT, {
+          method: 'GET',
+          headers: { 'Accept': 'application/json' },
+          cache: 'no-store'
+        });
+        if (res.ok) { const payload = await res.json(); remote = payload && payload.data ? payload.data : null; break; }
+      } catch (_) {}
+      if (attempt < 2) await new Promise(r => setTimeout(r, 700));
+    }
+    if (!remote) {
+      // 拉取失败：5 秒后台重试一次，期间不上传（避免用未合并的本地数据覆盖云端）
+      if (!SYNC._retryTimer) {
+        SYNC._retryTimer = setTimeout(() => { SYNC._retryTimer = null; App._syncPull(); }, 5000);
+      }
+      return false;
+    }
+    SYNC.INITIAL_PULL_DONE = true; // 已成功拉取云端基线，此后本地编辑才可安全上传
     const local = Store.load();
-    // 逐模块合并：谁的新用谁的，空/旧模块不会反向抹掉真实数据
+    // 逐模块合并：列表按 id 并集、其余按时间戳取较新方；空/旧模块不会反向抹掉真实数据
     const merged = mergeSyncData(local, remote);
     const changed = JSON.stringify(merged) !== JSON.stringify(local);
     if (changed) {
       Store.replaceAll(merged); // 静默写入，避免回环上传
       if (this.current) this.switch(this.current);
-      this._syncPush(merged); // 把合并结果（含本地较新模块）写回云端，让另一端也能拿到
-      toast('已同步最新数据');
+      this._syncPush(merged); // 把合并结果（含本地较新模块/条目）写回云端，让另一端也能拿到
+      if (typeof toast === 'function') toast('已同步最新数据');
       return true;
     }
     return false;
   } catch (_) {
-    // 离线或接口不可用（如本地开发环境无 /api/sync）：静默忽略
     return false;
   } finally {
     SYNC.PULLING = false;
@@ -2632,7 +2680,7 @@ App.addCustNew = function() {
     email: document.getElementById('n_email').value.trim(),
     firstDate, status, followDays,
     nextFollow: (status === 'unreplied' && followSel) ? U.addDays(firstDate, followDays) : '',
-    created: Date.now()
+    created: Date.now(), updated: Date.now()
   });
   Store.set('custNew', list);
   App.syncNewTodos();
@@ -2656,6 +2704,7 @@ App.saveCustNew = function(id) {
   c.status = status;
   c.followDays = followDays;
   c.nextFollow = (status === 'unreplied' && followSel) ? U.addDays(firstDate, followDays) : '';
+  c.updated = Date.now();
   Store.set('custNew', list);
   App.syncNewTodos();
   App._editCust = null;
@@ -2675,7 +2724,7 @@ App.addCustQuote = function() {
     quoteDate, followDays,
     nextFollow: U.addDays(quoteDate, followDays),
     lastFollowDate: '', lastFeedback: '',
-    created: Date.now()
+    created: Date.now(), updated: Date.now()
   });
   Store.set('custQuote', list);
   App.syncQuoteTodos();
@@ -2698,6 +2747,7 @@ App.saveCustQuote = function(id) {
   c.nextFollow = U.addDays(quoteDate, followDays);
   c.lastFollowDate = document.getElementById('cq_last').value;
   c.lastFeedback = document.getElementById('cq_fb').value.trim();
+  c.updated = Date.now();
   Store.set('custQuote', list);
   App.syncQuoteTodos();
   App._editCust = null;
@@ -2712,7 +2762,7 @@ App.addCustKey = function() {
     id: U.uid(), title,
     phone: document.getElementById('k_phone').value.trim(),
     email: document.getElementById('k_email').value.trim(),
-    created: Date.now()
+    created: Date.now(), updated: Date.now()
   });
   Store.set('custKey', list);
   App.modules.customers(document.getElementById('contentArea'));
@@ -2727,6 +2777,7 @@ App.saveCustKey = function(id) {
   c.title = title;
   c.phone = document.getElementById('ck_phone').value.trim();
   c.email = document.getElementById('ck_email').value.trim();
+  c.updated = Date.now();
   Store.set('custKey', list);
   App._editCust = null;
   App.modules.customers(document.getElementById('contentArea'));
