@@ -442,7 +442,14 @@ const App = {
   
   registerSW() {
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('sw.js').catch(() => {});
+      navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(() => {});
+      // 新 Service Worker 接管时自动刷新一次，确保加载到最新的 app.js / sw.js
+      let _reloading = false;
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (_reloading) return;
+        _reloading = true;
+        location.reload();
+      });
     }
   },
   
