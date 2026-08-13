@@ -1,15 +1,42 @@
 /* ===== Rhea Dashboard - App Logic ===== */
 
-// ===== GitHub Raw 数据源（Netlify 跳过部署时，前端直接从 GitHub 读取最新 JSON） =====
+// ===== 数据源 =====
+// 优先走 Netlify 云端函数 /api/content（服务器端实时抓取真实汇率+新闻，无需 GitHub 推送），
+// 失败再回退到 GitHub raw / jsDelivr（历史静态文件），最后回退本地。
 const GH_DATA = {
   RAW_BASE: 'https://raw.githubusercontent.com/rhea1118/rhea-dashboard/main/data',
   JSDELIVR_BASE: 'https://cdn.jsdelivr.net/gh/rhea1118/rhea-dashboard@main/data',
-  // 读取简报 JSON（多源回退：GitHub raw → jsDelivr CDN → 本地 API → Netlify 静态文件）
+  _contentCache: null,
+  _contentTs: 0,
+  _contentFetching: null,
+  _CACHE_TTL: 30 * 60 * 1000, // 前端缓存 30 分钟
+  // 统一从云端函数取 { briefing, learning }（带缓存 + 并发去重）
+  async fetchContent() {
+    if (this._contentCache && Date.now() - this._contentTs < this._CACHE_TTL) return this._contentCache;
+    if (this._contentFetching) return this._contentFetching;
+    this._contentFetching = (async () => {
+      try {
+        const resp = await fetch('/api/content?t=' + Date.now());
+        if (resp.ok) {
+          const j = await resp.json();
+          this._contentCache = j;
+          this._contentTs = Date.now();
+          return j;
+        }
+      } catch (e) { /* 云端函数不可用，回退静态源 */ }
+      return null;
+    })();
+    const r = await this._contentFetching;
+    this._contentFetching = null;
+    return r;
+  },
+  // 读取简报（优先云端函数，回退 GitHub / jsDelivr / 本地）
   async fetchBriefing() {
+    const content = await this.fetchContent();
+    if (content && content.briefing && content.briefing.africa) return content.briefing;
     const urls = [
       this.RAW_BASE + '/daily-brief.json?t=' + Date.now(),
       this.JSDELIVR_BASE + '/daily-brief.json?t=' + Date.now(),
-      '/api/briefing',
       'data/daily-brief.json?t=' + Date.now(),
       'data/briefing.json?t=' + Date.now()
     ];
@@ -17,12 +44,14 @@ const GH_DATA = {
       try {
         const resp = await fetch(url);
         if (resp.ok) return await resp.json();
-      } catch(e) { /* 网络错误，尝试下一个 URL */ }
+      } catch (e) { /* 尝试下一个源 */ }
     }
     return null;
   },
-  // 读取学习内容 JSON（多源回退）
+  // 读取学习内容（优先云端函数，回退 GitHub / jsDelivr / 本地）
   async fetchLearning() {
+    const content = await this.fetchContent();
+    if (content && content.learning && content.learning.english) return content.learning;
     const urls = [
       this.RAW_BASE + '/learning.json?t=' + Date.now(),
       this.JSDELIVR_BASE + '/learning.json?t=' + Date.now(),
@@ -32,7 +61,7 @@ const GH_DATA = {
       try {
         const resp = await fetch(url);
         if (resp.ok) return await resp.json();
-      } catch(e) { /* 网络错误，尝试下一个 URL */ }
+      } catch (e) { /* 尝试下一个源 */ }
     }
     return null;
   }
