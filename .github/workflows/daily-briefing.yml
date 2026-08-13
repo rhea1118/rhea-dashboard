@@ -86,6 +86,8 @@ jobs:
             exit 0
           fi
 
-          git commit -m "每日简报 $TODAY [skip netlify=false]"
+          # [skip netlify] 让 Netlify 跳过构建，避免每日消耗构建积分；
+          # 前端通过 GitHub raw URL 实时读取 main/data 下的最新 JSON，刷新即可更新
+          git commit -m "每日简报 $TODAY [skip netlify]"
           git push origin main
-          echo "🚀 已推送到 main 分支，Netlify 即将自动部署"
+          echo "🚀 已推送到 main 分支（含 [skip netlify]，Netlify 跳过构建，前端实时读取最新数据）"
