@@ -1,7 +1,7 @@
 {
-  "date": "2026-08-18",
+  "date": "2026-08-19",
   "english": {
-    "content": "📚 今日外贸英语\n\n【句子】\nCould you please confirm the shipping window and the Incoterms before we proceed with the PI?\n\n【释义】\n能否请您在确认形式发票（PI）之前，先确认装运期和国际贸易术语？\n\n【场景】\n外贸订单确认环节。买方在签回 PI 前卖方主动核对装运期与贸易术语以规避后续纠纷。\n\n【小技巧】\n\"shipping window\" 比 \"shipping date\" 更专业，强调可接受的装运时间段；\"Incoterms\" 是 International Commercial Terms 的缩写，务必与客户明确具体条款（如 FOB、CIF、EXW），避免责任归属不清。"
+    "content": "📚 今日外贸英语\n\n【句子】Could you please confirm the lead time and packaging details for the items listed in the attached PO?\n\n【释义】能否请您确认附件采购订单中所列货物的交货周期及包装细节？\n\n【场景】买家下单前的最终确认环节。客户已收到形式发票（PI），要求销售方再次核实生产周期（lead time）与包装规格（packing list / packaging details），以避免交期延误或到货后包装不符导致的拒收。\n\n【小技巧】lead time 是外贸高频词，指从下单到出货的整个周期；邮件中用 could you please confirm 比直接问 when 更加礼貌专业，配合 attached PO 让客户一目了然，便于留痕跟进。"
   },
   "finance": {
     "content": "💰 今日理财知识\n【知识点】基金定投与\"微笑曲线\"：定期定额买入基金，市场下跌时同样的金额能买到更多份额，从而摊低平均持仓成本；当市场先跌后涨，净值走势形似一张笑脸，坚持定投的人往往在回升段获利离场。\n【大白话】定投就像每月固定花钱\"囤菜\"：菜价（基金净值）跌了，同样的钱能囤更多，成本越摊越薄；等价格涨回来，你手里那些便宜份额就帮你赚差价。所以跌的时候别慌着\"割肉\"——那其实是给你打折进货；最亏的做法是跌了吓得清仓、涨了又追高买入。管住手、拿得住，让\"微笑曲线\"替你赚钱。"
